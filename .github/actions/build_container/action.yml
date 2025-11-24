@@ -1,0 +1,42 @@
+name: Builds the container and chroots
+description: |
+  This Github Actions builds the container and sets up the chroot environment for building packages for noble and questing.
+
+inputs:
+
+  arch:
+    description: The architecture to build for. Ex amd64, arm64, etc
+    required: true
+
+  push-to-ghcr:
+    description: Whether to push the built image to GitHub Container Registry
+    required: true
+    default: "true"
+
+  token:
+    description: PAT token
+    required: true
+
+  username:
+    description: Username for the PAT token
+    required: true
+
+runs:
+  using: "composite"
+  
+  steps:
+
+    - name: Build noble and questing containers
+      shell: bash
+      run: ./docker_deb_build.py --rebuild
+
+    # Don't push to GHCR if build was triggered by a PR
+    - name: Push to GHCR
+      if: ${{inputs.push-to-ghcr}} == 'true'
+      shell: bash
+      run: |
+        echo ${{inputs.token}} | docker login ghcr.io -u ${{inputs.username}} --password-stdin
+        docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:${{inputs.arch}}-noble
+        docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:${{inputs.arch}}-questing
+
+
