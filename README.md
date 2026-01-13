@@ -21,12 +21,18 @@ See the **Github Workflow** section below.
 
 ## Installation Instructions
 
-1. Clone the repository:
+1. Clone the repository \[in some tooling folder\]:
    ```bash
    git clone https://github.com/qualcomm-linux/docker_deb_build.git
-   cd docker_deb_build
    ```
-2. Ensure Docker is running and you have permissions to build containers. The build scripts does multiple pre-flight checks
+   
+2. Ensure Docker is running and you have permissions to build containers. The build scripts does multiple pre-flight checks.
+   Should any test fail, there will be instructions on what to do to fix the issue.
+
+3. Pro tip: Say you cloned this to your home folder, create a quick alias in your .bashrc file (debb == **deb**ian **b**uild:
+   ```
+   alias debb="~/docker_deb_build/docker_deb_build.py"
+   ```
 
 ## Usage
 
