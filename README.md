@@ -73,7 +73,7 @@ by adding a new line in the _.github/actions/build_container/action.yml_ in the 
    echo ${{inputs.token}} | docker login ghcr.io -u ${{inputs.username}} --password-stdin
    docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:${{inputs.arch}}-noble
    docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:${{inputs.arch}}-questing
-   <copy-paste the above like and modify the suite name at the end>
+   <copy-paste one of the above docker line and modify the suite name at the end>
 ```
 
 ### GitHub Workflow
