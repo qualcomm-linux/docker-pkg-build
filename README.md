@@ -66,6 +66,15 @@ Then, in the **docker_deb_build** script, add a new line for that suite in :
         <HERE>
         sys.exit(0)
 '''
+This will ensure that the new suite is built when running **$docker_deb_build.py --rebuild**
+The last step is to ensure the containers (amd64 and arm64) for that suite are also pushed to GHCR as part of the **container-build-and-upload** workflow
+by adding a new line in the _.github/actions/build_container/action.yml_ in the _Push to GHCR_ step : 
+'''
+   echo ${{inputs.token}} | docker login ghcr.io -u ${{inputs.username}} --password-stdin
+   docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:${{inputs.arch}}-noble
+   docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:${{inputs.arch}}-questing
+   <copy-paste the above like and modify the suite name at the end>
+'''
 
 ### GitHub Workflow
 
