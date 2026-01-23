@@ -34,6 +34,12 @@ def parse_arguments() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(description="Build a debian package inside a docker container.")
 
+    parser.add_argument("--no-update-check",
+                        default=False,
+                        required=False,
+                        action='store_true',
+                        help="Bypass the remote update check and allow running with an out-of-date repo.")
+
     parser.add_argument("--source-dir",
                         required=False,
                         default=".",
@@ -326,13 +332,58 @@ def build_package_in_docker(image_base: str, source_dir: str, output_dir: str, b
 
     return res.returncode == 0
 
+def check_if_repo_up_to_date(bypass: bool) -> None:
+    """
+    Check if the local docker_deb_build repository is up to date with the remote.
+    """
+
+    REMOTE = "https://github.com/qualcomm-linux/docker_deb_build.git"
+
+    try:
+        # Find the repo root
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+        while not os.path.isdir(os.path.join(repo_dir, ".git")):
+            parent = os.path.dirname(repo_dir)
+            if parent == repo_dir:
+                logger.warning("Not inside a git repository; cannot check for updates.")
+                return
+            repo_dir = parent
+
+        # Get local HEAD commit hash
+        local_head = subprocess.check_output([
+            "git", "rev-parse", "HEAD"
+        ], cwd=repo_dir, text=True).strip()
+
+        # Fetch remote HEAD commit hash (default branch)
+        remote_head = subprocess.check_output([
+            "git", "ls-remote", REMOTE, "HEAD"
+        ], cwd=repo_dir, text=True).strip().split()[0]
+
+        if local_head != remote_head:
+            logger.critical("!"*80)
+            logger.critical("Your local docker_deb_build repo is NOT UP TO DATE with the remote!")
+            logger.critical(f"  Local HEAD : {local_head}")
+            logger.critical(f"  Remote HEAD: {remote_head}")
+            logger.critical(f"Please pull the latest changes from {REMOTE}.")
+            logger.critical(f"Then re-run this script with --rebuild to rebuild the docker images if needed.")
+            logger.warning("To bypass this check, supply the --no-update-check argument.")
+            logger.critical("!"*80)
+            if not bypass:
+                sys.exit(2)
+    except Exception as e:
+        logger.warning(f"Could not check if repo is up to date: {e}")
+
 def main() -> None:
     """
     Main entry point of the script. Parses arguments, checks Docker, builds the package, and handles rebuilds.
     """
+
     args = parse_arguments()
 
     logger.debug(f"Print of the arguments: {args}")
+
+    # Determine if the docker_pkg_build repo is up to date with remote
+    check_if_repo_up_to_date(args.no_update_check)
 
     # In sbuild terms, the build architecture is the architecture of the machine doing the build,
     # aka the architecture of the machine running this script.
