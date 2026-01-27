@@ -6,9 +6,10 @@
 create_data_tar.py
 
 Standalone utility to:
-- Parse a .changes file (provided via --changes-file, or auto-detected)
-- Extract each referenced .deb into data/<pkg>/<arch>/
-- Pack the data/ directory as <changes_basename>.tar.gz in the same directory as the .changes file
+- Locate a .changes file via --path-to-changes (file path or directory; if directory, the newest .changes is selected)
+- Extract each referenced .deb into data/<pkg>/<arch>/ under the directory containing the .changes file
+- Pack the data/ directory as <changes_basename>.tar.gz
+- Place the tarball under <output-tar>/prebuilt_<distro>/ when --output-tar and --distro are provided; otherwise follow the fallback rules described in --output-tar help.
 """
 
 import os
@@ -28,16 +29,16 @@ def parse_arguments():
         description="Generate data.tar.gz by extracting deb contents to data/<pkg>/<arch>/ from a .changes file."
     )
     parser.add_argument(
-        "--changes-file",
-        required=False,
-        default="",
-        help="Path to the .changes file. If not provided, the newest .changes in --output-dir will be used."
-    )
-    parser.add_argument(
-        "--output-dir",
+        "--path-to-changes",
         required=False,
         default=".",
-        help="Directory to search for the newest .changes when --changes-file is not provided. Also used as default working dir."
+        help="Path to the .changes file or a directory containing .changes files. If a directory is provided, the newest .changes will be used."
+    )
+    parser.add_argument(
+        "--output-tar",
+        required=False,
+        default="",
+        help="Base output directory where the tarball will be placed. When --distro is provided, the tarball will be written to <output-tar>/prebuilt_<distro>/"
     )
     parser.add_argument(
         "--arch",
@@ -45,29 +46,37 @@ def parse_arguments():
         default="arm64",
         help="Architecture subfolder under each package directory (default: arm64)."
     )
+    parser.add_argument(
+        "--distro",
+        required=False,
+        default="",
+        help="Target distro name (e.g., noble, questing). If provided, tar will be placed under <output-tar>/prebuilt_<distro>/"
+    )
     return parser.parse_args()
 
 
-def find_changes_file(changes_file: str, output_dir: str) -> str:
+def find_changes_file(path_to_changes: str) -> str:
     """
     Return the path to the .changes file to use.
-    Priority:
-      1) If changes_file is provided and exists, use it.
-      2) Else, find newest *.changes in output_dir.
+    If path_to_changes is a .changes file path, use it.
+    If it is a directory, find the newest *.changes in that directory.
     """
-    if changes_file:
-        if os.path.exists(changes_file):
-            return os.path.abspath(changes_file)
-        else:
-            raise FileNotFoundError(f"Specified --changes-file not found: {changes_file}")
+    if not path_to_changes:
+        path_to_changes = '.'
 
-    # Search for newest .changes in output_dir
-    candidates = glob.glob(os.path.join(output_dir or '.', '*.changes'))
-    if not candidates:
-        raise FileNotFoundError(f"No .changes files found in directory: {output_dir}")
+    path_to_changes = os.path.abspath(path_to_changes)
 
-    newest = max(candidates, key=lambda p: os.path.getmtime(p))
-    return os.path.abspath(newest)
+    if os.path.isfile(path_to_changes) and path_to_changes.endswith('.changes'):
+        return path_to_changes
+
+    if os.path.isdir(path_to_changes):
+        candidates = glob.glob(os.path.join(path_to_changes, '*.changes'))
+        if not candidates:
+            raise FileNotFoundError(f"No .changes files found in directory: {path_to_changes}")
+        newest = max(candidates, key=lambda p: os.path.getmtime(p))
+        return os.path.abspath(newest)
+
+    raise FileNotFoundError(f"Invalid --path-to-changes: {path_to_changes}. Provide a .changes file or a directory containing .changes files.")
 
 
 def collect_debs_from_changes(changes_path: str):
@@ -136,17 +145,17 @@ def extract_debs_to_data(deb_names, work_dir, arch) -> bool:
     return True
 
 
-def create_tar_of_data(work_dir: str, tar_name: str) -> str:
+def create_tar_of_data(work_dir: str, tar_path: str) -> str:
     """
-    Create work_dir/<tar_name> containing the data/ directory.
+    Create tarball at tar_path containing the data/ directory from work_dir.
     Returns the path to the tarball on success.
     """
     data_root = os.path.join(work_dir, 'data')
     if not os.path.isdir(data_root):
         raise RuntimeError(f"Missing data directory to archive: {data_root}")
 
-    tar_path = os.path.join(work_dir, tar_name)
     logger.debug(f"Creating tarball: {tar_path}")
+    os.makedirs(os.path.dirname(tar_path) or '.', exist_ok=True)
     with tarfile.open(tar_path, 'w:gz') as tar:
         tar.add(data_root, arcname='data')
     return tar_path
@@ -157,7 +166,7 @@ def main():
 
     # Determine the .changes file
     try:
-        changes_path = find_changes_file(args.changes_file, args.output_dir)
+        changes_path = find_changes_file(args.path_to_changes)
     except Exception as e:
         logger.critical(str(e))
         sys.exit(1)
@@ -185,7 +194,16 @@ def main():
         tar_name = re.sub(r'\.changes$', '.tar.gz', base)
         if tar_name == base:
             tar_name = base + '.tar.gz'
-        tar_path = create_tar_of_data(work_dir, tar_name)
+        # Determine destination tar path based on --output-tar and --distro
+        if args.output_tar:
+            base_output_dir = os.path.abspath(args.output_tar)
+            dest_dir = os.path.join(base_output_dir, f'prebuilt_{args.distro}') if args.distro else base_output_dir
+            tar_path = os.path.join(dest_dir, tar_name)
+        else:
+            # Fallback to work_dir if no explicit output tar path is provided
+            dest_dir = os.path.join(work_dir, f'prebuilt_{args.distro}') if args.distro else work_dir
+            tar_path = os.path.join(dest_dir, tar_name)
+        tar_path = create_tar_of_data(work_dir, tar_path)
         logger.info(f"Created tarball: {tar_path}")
     except Exception as e:
         logger.critical(f"Failed to create tarball: {e}")
