@@ -1,4 +1,4 @@
-# docker_deb_build
+# docker-pkg-build
 
 A Python-based tool for building Debian packages inside Docker containers, designed for Qualcomm Linux projects.
 It supports multiple architectures (amd64, arm64) and Ubuntu versions (noble, questing) to ensure consistent and reproducible package builds.
