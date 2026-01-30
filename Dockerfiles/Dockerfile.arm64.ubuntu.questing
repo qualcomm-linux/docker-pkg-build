@@ -1,0 +1,28 @@
+# Use an official Ubuntu base image
+FROM ubuntu:questing
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+COPY base-packages.txt /tmp/base-packages.txt
+
+RUN apt-get update && \
+    apt-get install -y $(cat /tmp/base-packages.txt | tr '\n' ' ') && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY extra-packages.txt /tmp/extra-packages.txt
+
+RUN EXTRA_PACKAGES=$(tr -s '[:space:]' ',' < /tmp/extra-packages.txt) && \
+    sbuild-createchroot --include="$EXTRA_PACKAGES" \
+                        --arch=arm64 \
+                        --components=main,universe \
+                        questing \
+                        /srv/chroot/questing \
+                        http://ports.ubuntu.com
+                        
+# Set working directory
+WORKDIR /workspace
+
+# Default command
+CMD [ "bash" ]

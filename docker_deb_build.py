@@ -25,6 +25,13 @@ import getpass
 
 from color_logger import logger
 
+# Docker image name template
+# Build arch and suite name will be formatted later
+# build_arch: 'amd64' or 'arm64'
+# suite_name: 'noble', 'questing', 'sid'
+# Example: ghcr.io/qualcomm-linux/pkg-builder:arm64-noble
+DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{build_arch}-{suite_name}"
+
 def parse_arguments() -> argparse.Namespace:
     """
     Parse command line arguments for the script.
@@ -34,39 +41,39 @@ def parse_arguments() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(description="Build a debian package inside a docker container.")
 
-    parser.add_argument("--no-update-check",
+    parser.add_argument("-n", "--no-update-check",
                         default=False,
                         required=False,
                         action='store_true',
                         help="Bypass the remote update check and allow running with an out-of-date repo.")
 
-    parser.add_argument("--source-dir",
+    parser.add_argument("-s", "--source-dir",
                         required=False,
                         default=".",
                         help="Path to the source directory containing the debian package source.")
 
-    parser.add_argument("--output-dir",
+    parser.add_argument("-o", "--output-dir",
                         required=False,
                         default="..",
                         help="Path to the output directory for the built package.")
 
-    parser.add_argument("--distro",
+    parser.add_argument("-d", "--distro",
                         type=str,
-                        choices=['noble', 'questing', 'sid'],
+                        choices=['noble', 'questing', 'resolute', 'trixie', 'sid'],
                         default='noble',
                         help="The target distribution for the package build.")
 
-    parser.add_argument("--run-lintian",
+    parser.add_argument("-l", "--run-lintian",
                         action='store_true',
                         help="Run lintian on the package.")
 
-    parser.add_argument("--extra-repo",
+    parser.add_argument("-e", "--extra-repo",
                         type=str,
                         action='append',
                         default=[],
                         help="Additional APT repository to include. Can be specified multiple times. Example: 'deb [arch=arm64 trusted=yes] http://pkg.qualcomm.com noble/stable main'")
 
-    parser.add_argument("--rebuild",
+    parser.add_argument("-r", "--rebuild",
                         action='store_true',
                         help="Rebuild the package if it already exists.")
 
@@ -137,12 +144,11 @@ def check_docker_dependencies(timeout: int = 20) -> bool:
     except subprocess.TimeoutExpired:
         raise Exception("Timed out while trying to contact the Docker daemon. Is it running?")
 
-def build_docker_image(image: str, arch: str, distro: str) -> bool:
+def build_docker_image(arch: str, distro: str) -> bool:
     """
     Build a Docker image from the local Dockerfile.
 
     Args:
-        image (str): The name of the Docker image to build.
         arch (str): The architecture (e.g., 'amd64', 'arm64').
         distro (str): The distribution (e.g., 'noble', 'questing').
 
@@ -152,19 +158,27 @@ def build_docker_image(image: str, arch: str, distro: str) -> bool:
     Raises:
         Exception: If the build fails or times out.
     """
+
     this_script_dir = os.path.dirname(os.path.abspath(__file__))
-    docker_dir = os.path.normpath(os.path.join(this_script_dir, 'docker'))
+    docker_dir = os.path.normpath(os.path.join(this_script_dir, 'Dockerfiles'))
     context_dir = docker_dir
-    dockerfile_name = f"Dockerfile.{arch}.{distro}"
+    # Find the Dockerfile matching the pattern Dockerfile.{arch}.*.{distro}
+    pattern = f"Dockerfile.{arch}.*.{distro}"
+    matches = glob.glob(os.path.join(docker_dir, pattern))
+    if not matches:
+        raise Exception(f"No Dockerfile found matching pattern: {pattern} in {docker_dir}")
+    dockerfile_name = os.path.basename(matches[0])
     dockerfile_path = os.path.join(docker_dir, dockerfile_name)
 
-    logger.debug(f"Building docker image '{image}' for arch '{arch}' from Dockerfile: {dockerfile_path}")
+    image_name = DOCKER_IMAGE_NAME_FMT.format(build_arch=arch, suite_name=distro)
+
+    logger.debug(f"Building docker image '{image_name}' for arch '{arch}' from Dockerfile: {dockerfile_path}")
     
     if not os.path.exists(dockerfile_path):
         logger.error(f"No local Dockerfile found for arch '{arch}' at expected path: {dockerfile_path}. Cannot build image '{image}'.")
         return False
 
-    build_cmd = ["docker", "build", "-t", image, "-f", dockerfile_path, context_dir]
+    build_cmd = ["docker", "build", "-t", image_name, "-f", dockerfile_path, context_dir]
 
     logger.debug(f"Running: {' '.join(build_cmd)}")
 
@@ -187,69 +201,38 @@ def build_docker_image(image: str, arch: str, distro: str) -> bool:
         if rc != 0:
             raise Exception(f"Failed to build docker image from {dockerfile_path} (exit {rc}).")
 
-        logger.info(f"Successfully built image '{image}'.")
+        logger.info(f"Successfully built image '{image_name}'.")
         return True
     except subprocess.TimeoutExpired:
         proc.kill()
         raise Exception(f"Timed out while building docker image from {dockerfile_path}.")
 
-def rebuild_docker_image(image_base: str, arch: str, distro: str) -> None:
+def rebuild_docker_images(build_arch: str) -> None:
     """
-    Force rebuild of the given docker image from local Dockerfile.
-    """
-
-    image = f"{image_base}{distro}"
-
-    logger.debug(f"Rebuilding docker image '{image}' from local Dockerfile...")
-
-    # Delete/purge the current image if it exists
-
-    try:
-        subprocess.run(["docker", "image", "rm", "-f", image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        logger.info(f"Deleted existing image '{image}'.")
-    except subprocess.CalledProcessError:
-        logger.debug(f"No existing image '{image}' to delete.")
-
-    # Build the image
-    build_docker_image(image, arch, distro)
-
-def check_docker_image(image_base: str, arch: str, distro: str) -> bool:
-    """
-    Ensure the given docker image is available locally. If not, look for a local Dockerfile
-    in the docker/ folder named `Dockerfile.{arch}.{distro}`.
-    Raises an Exception with actionable guidance on failure.
-
-    Args:
-        image_base (str): The base name of the Docker image.
-        arch (str): The architecture (e.g., 'amd64', 'arm64').
-        distro (str): The distribution (e.g., 'noble', 'questing').
-
-    Returns:
-        bool: True if the image is available or built successfully.
-
-    Raises:
-        Exception: If the image cannot be found or built.
+    Force rebuild of all the containers for the given architecture from Dockerfiles folder
     """
 
-    image = f"{image_base}{distro}"
+    docker_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Dockerfiles')
+    dockerfile_glob = os.path.join(docker_dir, f'Dockerfile.{build_arch}.*')
+    dockerfiles = sorted(glob.glob(dockerfile_glob))
+    logger.info(f"Found Dockerfiles for rebuild: {dockerfiles}")
 
-    logger.debug(f"Checking for docker image: {image}")
+    for dockerfile in dockerfiles:
+        suite_name = os.path.basename(dockerfile).split('.')[-1]
+        image_name = DOCKER_IMAGE_NAME_FMT.format(build_arch=build_arch, suite_name=suite_name)
 
-    # 1) check if image exists locally
-    try:
-        subprocess.run(["docker", "image", "inspect", image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       check=True, timeout=10)
-        logger.info(f"Docker image '{image}' is present locally.")
-        return True
-    except subprocess.CalledProcessError:
-        logger.warning(f"Docker image '{image}' not found locally.")
-    except subprocess.TimeoutExpired:
-        raise Exception("Timed out while checking local docker images.")
+        logger.debug(f"Rebuilding docker image '{image_name}' from local Dockerfile...")
 
-    # Since the image is not present locally, try to build it from local Dockerfile
-    build_docker_image(image, arch, distro)
+        # Delete/purge the current image if it exists
+        try:
+            subprocess.run(["docker", "image", "rm", "-f", image_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            logger.info(f"Deleted existing image '{image_name}'.")
+        except subprocess.CalledProcessError:
+            logger.debug(f"No existing image '{image_name}' to delete.")
 
-def build_package_in_docker(image_base: str, source_dir: str, output_dir: str, build_arch: str, distro: str, run_lintian: bool, extra_repo: str) -> bool:
+        build_docker_image(build_arch, suite_name)
+
+def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, build_arch: str, distro: str, run_lintian: bool, extra_repo: str) -> bool:
     """
     Build the debian package inside the given docker image.
     source_dir: path to the debian package source (mounted into the container)
@@ -260,8 +243,6 @@ def build_package_in_docker(image_base: str, source_dir: str, output_dir: str, b
     extra_repo: list of additional APT repositories to include
     Returns True on success, False on failure.
     """
-
-    image = f"{image_base}{distro}"
 
     # Register the name of the newest build log in the output_dir in case there are leftovers from a previous build
     # So that we can identify if this run produced a newer build log. Sbuild produces .build files with timestamps,
@@ -305,7 +286,7 @@ def build_package_in_docker(image_base: str, source_dir: str, output_dir: str, b
         '-v', f"{source_dir}:/workspace/src:Z",
         '-v', f"{output_dir}:/workspace/output:Z",
         '-w', '/workspace/src',
-        image, 'bash', '-c', build_cmd
+        image_name, 'bash', '-c', build_cmd
     ]
 
     logger.debug(f"Running build inside container: {' '.join(docker_cmd[:])}")
@@ -332,62 +313,64 @@ def build_package_in_docker(image_base: str, source_dir: str, output_dir: str, b
 
     return res.returncode == 0
 
-def check_if_repo_up_to_date(bypass: bool) -> None:
+def check_if_repo_up_to_date() -> None:
     """
     Check if the local docker_deb_build repository is up to date with the remote.
     """
 
     REMOTE = "https://github.com/qualcomm-linux/docker_deb_build.git"
 
-    try:
-        # Find the repo root
-        repo_dir = os.path.dirname(os.path.abspath(__file__))
-        while not os.path.isdir(os.path.join(repo_dir, ".git")):
-            parent = os.path.dirname(repo_dir)
-            if parent == repo_dir:
-                logger.warning("Not inside a git repository; cannot check for updates.")
-                return
-            repo_dir = parent
+    # Find the repo root
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
+    while not os.path.isdir(os.path.join(repo_dir, ".git")):
+        parent = os.path.dirname(repo_dir)
+        if parent == repo_dir:
+            logger.warning("Not inside a git repository; cannot check for updates.")
+            return
+        repo_dir = parent
 
-        # Get local HEAD commit hash
-        local_head = subprocess.check_output([
-            "git", "rev-parse", "HEAD"
-        ], cwd=repo_dir, text=True).strip()
+    # Get local HEAD commit hash
+    local_head = subprocess.check_output([
+        "git", "rev-parse", "HEAD"
+    ], cwd=repo_dir, text=True).strip()
 
-        # Fetch remote HEAD commit hash (default branch)
-        remote_head = subprocess.check_output([
-            "git", "ls-remote", REMOTE, "HEAD"
-        ], cwd=repo_dir, text=True).strip().split()[0]
+    # Fetch remote HEAD commit hash (default branch)
+    remote_head = subprocess.check_output([
+        "git", "ls-remote", REMOTE, "HEAD"
+    ], cwd=repo_dir, text=True).strip().split()[0]
 
-        if local_head != remote_head:
-            logger.critical("!"*80)
-            logger.critical("Your local docker_deb_build repo is NOT UP TO DATE with the remote!")
-            logger.critical(f"  Local HEAD : {local_head}")
-            logger.critical(f"  Remote HEAD: {remote_head}")
-            logger.critical(f"Please pull the latest changes from {REMOTE}.")
-            logger.critical(f"Then re-run this script with --rebuild to rebuild the docker images if needed.")
-            logger.warning("To bypass this check, supply the --no-update-check argument.")
-            logger.critical("!"*80)
-            if not bypass:
-                sys.exit(2)
+    if local_head != remote_head:
+        logger.critical("!"*80)
+        logger.critical("Your local docker_deb_build repo is NOT UP TO DATE with the remote!")
+        logger.critical(f"  Local HEAD : {local_head}")
+        logger.critical(f"  Remote HEAD: {remote_head}")
+        logger.critical(f"Please pull the latest changes from {REMOTE}.")
+        logger.critical(f"Then re-run this script with --rebuild to rebuild the docker images if needed.")
+        logger.warning("To bypass this check, supply the --no-update-check argument.")
+        logger.critical("!"*80)
+        sys.exit(2)
 
-        else:
-            logger.info("The docker-pkg-build repo is up to date with the remote.")
+    else:
+        logger.info("The docker-pkg-build repo is up to date with the remote.")
 
-    except Exception as e:
-        logger.warning(f"Could not check if repo is up to date: {e}")
 
 def main() -> None:
     """
-    Main entry point of the script. Parses arguments, checks Docker, builds the package, and handles rebuilds.
+    Main entry point of the script.
+    - Parses arguments
+    - Checks if this repo is up to date
+    - Handles containers rebuild
+    - Docker preflight checks
+    - Builds the package inside the container
     """
 
     args = parse_arguments()
 
     logger.debug(f"Print of the arguments: {args}")
 
-    # Determine if the docker_pkg_build repo is up to date with remote
-    check_if_repo_up_to_date(args.no_update_check)
+    # Determine if the docker-pkg-build repo is up to date with remote
+    if not args.no_update_check:
+        check_if_repo_up_to_date()
 
     # In sbuild terms, the build architecture is the architecture of the machine doing the build,
     # aka the architecture of the machine running this script.
@@ -408,13 +391,9 @@ def main() -> None:
     # Verify Docker is available and the current user can talk to the daemon
     check_docker_dependencies()
 
-    image_base = f"ghcr.io/qualcomm-linux/pkg-builder:{build_arch}-"
-
-    # If --rebuild is specified, force rebuild of the docker image and exit
+    # If --rebuild is specified, force rebuild of the docker images and exit
     if args.rebuild:
-        rebuild_docker_image(image_base, build_arch, 'noble')
-        rebuild_docker_image(image_base, build_arch, 'questing')
-        rebuild_docker_image(image_base, build_arch, 'sid')
+        rebuild_docker_images(build_arch)
         sys.exit(0)
 
     # Make sure source and output dirs are absolute paths
@@ -426,10 +405,21 @@ def main() -> None:
     logger.debug(f"The source dir is {args.source_dir}")
     logger.debug(f"The output dir is {args.output_dir}")
 
-    # Ensure the docker image is available, building it from local Dockerfile if needed
-    check_docker_image(image_base, build_arch, args.distro)
+    image_name = DOCKER_IMAGE_NAME_FMT.format(build_arch=build_arch, suite_name=args.distro)
+    
 
-    ret = build_package_in_docker(image_base, args.source_dir, args.output_dir, build_arch, args.distro, args.run_lintian, args.extra_repo)
+    image_exist = subprocess.run(["docker", "image", "inspect", image_name],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 check=False,
+                                 timeout=10)
+    if image_exist.returncode != 0:
+        logger.warning(f"Docker image '{image_name}' is not present locally.")
+        build_docker_image(build_arch, args.distro)
+    else:
+        logger.info(f"Docker image '{image_name}' is present locally.")
+
+    ret = build_package_in_docker(image_name, args.source_dir, args.output_dir, build_arch, args.distro, args.run_lintian, args.extra_repo)
 
     if ret:
         sys.exit(0)

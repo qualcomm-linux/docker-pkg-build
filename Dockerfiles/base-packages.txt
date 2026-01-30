@@ -1,0 +1,12 @@
+curl
+git
+git-buildpackage
+sbuild
+schroot
+gh
+jq
+debootstrap
+tree
+build-essential
+debhelper
+abigail-tools

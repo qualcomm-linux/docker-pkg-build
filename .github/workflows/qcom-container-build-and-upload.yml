@@ -15,14 +15,16 @@ on:
       - main
     paths:
       - '.github/workflows/qcom-container-build-and-upload.yml'
-      - 'docker/**'
+      - '.github/actions/build_container/action.yml'
+      - 'Dockerfiles/**'
 
   push:
     branches:
       - main
     paths:
       - '.github/workflows/qcom-container-build-and-upload.yml'
-      - 'docker/**'
+      - '.github/actions/build_container/action.yml'
+      - 'Dockerfiles/**'
 
   workflow_dispatch:
 

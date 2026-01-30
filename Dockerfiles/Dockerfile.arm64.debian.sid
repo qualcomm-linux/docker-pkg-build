@@ -1,0 +1,35 @@
+# Debian sid (unstable) base image
+FROM debian:sid
+
+# Avoid interactive prompts during apt operations
+ENV DEBIAN_FRONTEND=noninteractive
+
+COPY base-packages.txt /tmp/base-packages.txt
+
+RUN apt-get update && \
+    apt-get install -y $(cat /tmp/base-packages.txt | tr '\n' ' ') && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Force sbuild to use the schroot backend.
+# On sid, the default backend (systemd-nspawn) fails to build the chroot unless we do this
+RUN mkdir -p /root/.config/sbuild && \
+    printf '%s\n' \
+      '$chroot_mode = "schroot";' \
+    > /root/.config/sbuild/config.pl
+
+COPY extra-packages.txt /tmp/extra-packages.txt
+
+RUN EXTRA_PACKAGES=$(tr -s '[:space:]' ',' < /tmp/extra-packages.txt) && \
+    sbuild-createchroot --include="$EXTRA_PACKAGES" \
+                        --arch=arm64 \
+                        --components=main,contrib,non-free,non-free-firmware \
+                        sid \
+                        /srv/chroot/sid \
+                        http://deb.debian.org/debian
+
+# Workspace for mounting sources/outputs (your script already bind-mounts /workspace)
+WORKDIR /workspace
+
+# Default shell
+CMD ["bash"]

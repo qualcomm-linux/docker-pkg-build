@@ -1,23 +1,15 @@
-
-# syntax=docker/dockerfile:1.6
-
-# Debian sid (unstable) base image
-FROM debian:sid
+# Debian trixie base image
+FROM debian:trixie
 
 # Avoid interactive prompts during apt operations
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Base tooling for Debian packaging + chroot creation
-# (eatmydata/ccache are nice QoL additions; remove if you prefer)
-RUN apt-get update && apt-get install -y \
-    ca-certificates gnupg \
-    curl git jq tree gh \
-    sbuild schroot debootstrap \
-    git-buildpackage devscripts \
-    build-essential debhelper \
-    abigail-tools \
-    eatmydata ccache \
- && rm -rf /var/lib/apt/lists/*
+COPY base-packages.txt /tmp/base-packages.txt
+
+RUN apt-get update && \
+    apt-get install -y $(cat /tmp/base-packages.txt | tr '\n' ' ') && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Force sbuild to use the schroot backend.
 # sbuild-createchroot is for schroot-managed chroots; this avoids the "unshare" warning.
@@ -27,27 +19,21 @@ RUN mkdir -p /root/.config/sbuild && \
       '$schroot = "schroot";' \
     > /root/.config/sbuild/config.pl
 
-# Optional list of extra packages to seed into the chroot during creation.
-COPY extra-packages.txt /tmp/extra-packages.txt
-
-# Create a Debian sid sbuild chroot and prepare it for cross-building to arm64.
+# Create a Debian trixie sbuild chroot and prepare it for cross-building to arm64.
 RUN set -eux; \
-    EXTRA_PACKAGES="$(tr -s '[:space:]' ',' < /tmp/extra-packages.txt || true)"; \
-    \
     # Create the chroot from Debian mirrors (NOT Ubuntu) with Debian components.
     sbuild-createchroot \
       --arch=amd64 \
       --components=main,contrib,non-free,non-free-firmware \
-      ${EXTRA_PACKAGES:+--include="$EXTRA_PACKAGES"} \
-      sid /srv/chroot/sid http://deb.debian.org/debian; \
+      trixie /srv/chroot/trixie http://deb.debian.org/debian; \
     \
     # Configure the chroot's apt sources + enable multi-arch + install cross toolchain.
-    chroot /srv/chroot/sid /bin/bash -lc '\
+    chroot /srv/chroot/trixie /bin/bash -lc '\
       set -eux; \
-      # Minimal, correct sources for Debian sid. Add contrib/non-free only if needed.
+      # Minimal, correct sources for Debian trixie. Add contrib/non-free only if needed.
       printf "%s\n" \
-        "deb http://deb.debian.org/debian sid main" \
-        "# deb http://deb.debian.org/debian sid contrib non-free non-free-firmware" \
+        "deb http://deb.debian.org/debian trixie main" \
+        "# deb http://deb.debian.org/debian trixie contrib non-free non-free-firmware" \
         > /etc/apt/sources.list; \
       \
       # Enable arm64 multi-arch so sbuild can satisfy Build-Depends for the host arch.
