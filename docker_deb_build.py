@@ -72,6 +72,12 @@ def parse_arguments() -> argparse.Namespace:
                         action='append',
                         default=[],
                         help="Additional APT repository to include. Can be specified multiple times. Example: 'deb [arch=arm64 trusted=yes] http://pkg.qualcomm.com noble/stable main'")
+                        
+    parser.add_argument("-p", "--extra-package",
+                        type=str,
+                        action='append',
+                        default=[],
+                        help="Additional .deb file or directory to install inside the build chroot. Can be specified multiple times.")
 
     parser.add_argument("-r", "--rebuild",
                         action='store_true',
@@ -232,7 +238,7 @@ def rebuild_docker_images(build_arch: str) -> None:
 
         build_docker_image(build_arch, suite_name)
 
-def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, build_arch: str, distro: str, run_lintian: bool, extra_repo: str) -> bool:
+def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, build_arch: str, distro: str, run_lintian: bool, extra_repo: str, extra_package: str) -> bool:
     """
     Build the debian package inside the given docker image.
     source_dir: path to the debian package source (mounted into the container)
@@ -254,9 +260,10 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, b
     # Build the gbp command
     # The --git-builder value is a single string passed to gbp
     extra_repo_option = " ".join(f"--extra-repository='{repo}'" for repo in extra_repo) if extra_repo else ""
+    extra_package_option = " ".join(f"--extra-package='{pkg}'" for pkg in extra_package) if extra_package else ""
     lintian_option = '--no-run-lintian' if not run_lintian else ""
     # --no-clean-source: skip dpkg-buildpackage --clean on host (avoids build-dep check outside chroot)
-    sbuild_cmd = f"sbuild --no-clean-source --build-dir=/workspace/output --host=arm64 --build={build_arch} --dist={distro} {lintian_option} {extra_repo_option}"
+    sbuild_cmd = f"sbuild --no-clean-source --build-dir=/workspace/output --host=arm64 --build={build_arch} --dist={distro} {lintian_option} {extra_repo_option} {extra_package_option}"
 
     # Ensure git inside the container treats the mounted checkout as safe
     git_safe_cmd = "git config --global --add safe.directory /workspace/src"
@@ -281,10 +288,22 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, b
     else:
         raise Exception(f"Unsupported debian/source/format in {format_file}. Expected to contain 'native' or 'quilt', got: {fmt!r}")
 
+    # Prepare volume mounts for extra packages (files or directories)
+    extra_mounts = []
+    for pkg_path in extra_package:
+        abs_path = os.path.abspath(pkg_path)
+        if not os.path.exists(abs_path):
+            logger.warning(f"Extra package path does not exist and will be ignored: {pkg_path}")
+            continue
+        # Mount at the same absolute path inside the container
+        extra_mounts.extend(['-v', f"{abs_path}:{abs_path}:Z"])
+
     docker_cmd = [
         'docker', 'run', '--rm', '--privileged', "-t",
         '-v', f"{source_dir}:/workspace/src:Z",
         '-v', f"{output_dir}:/workspace/output:Z",
+        # Insert any extra package mounts
+        *extra_mounts,
         '-w', '/workspace/src',
         image_name, 'bash', '-c', build_cmd
     ]
@@ -419,7 +438,7 @@ def main() -> None:
     else:
         logger.info(f"Docker image '{image_name}' is present locally.")
 
-    ret = build_package_in_docker(image_name, args.source_dir, args.output_dir, build_arch, args.distro, args.run_lintian, args.extra_repo)
+    ret = build_package_in_docker(image_name, args.source_dir, args.output_dir, build_arch, args.distro, args.run_lintian, args.extra_repo, args.extra_package)
 
     if ret:
         sys.exit(0)
