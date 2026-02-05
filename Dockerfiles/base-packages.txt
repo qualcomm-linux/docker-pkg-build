@@ -10,3 +10,4 @@ tree
 build-essential
 debhelper
 abigail-tools
+ca-certificates
