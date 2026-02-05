@@ -337,7 +337,7 @@ def check_if_repo_up_to_date() -> None:
     Check if the local docker_deb_build repository is up to date with the remote.
     """
 
-    REMOTE = "https://github.com/qualcomm-linux/docker_deb_build.git"
+    REMOTE = "https://github.com/qualcomm-linux/docker-pkg-build.git"
 
     # Find the repo root
     repo_dir = os.path.dirname(os.path.abspath(__file__))
