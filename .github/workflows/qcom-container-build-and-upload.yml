@@ -63,6 +63,13 @@ jobs:
         uses: ./.github/actions/build_container
         with:
           arch: arm64
+
+      - name: Build and Upload Images
+        uses: ./.github/actions/upload_containers
+        # Only upload if the PR is being merged
+        if: ${{ github.event_name == 'schedule' || gitub.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true }}
+        with:
+          arch: arm64
           push-to-ghcr: ${{ github.event_name != 'pull_request_target' }}
           token: ${{ secrets.DEB_PKG_BOT_CI_TOKEN }}
           username: ${{ vars.DEB_PKG_BOT_CI_USERNAME }}
