@@ -98,6 +98,53 @@ mkdir build
 debb --source-dir pkg-example --output-dir build --distro questing
 ```
 
+
+## Batch Building Multiple Packages
+
+The `helper_scripts/batch_build_and_package.py` script automates building multiple
+Debian packages in batch and packaging all results into a single combined tarball.
+
+It orchestrates `docker_deb_build.py` and `create_data_tar.py` without modifying them,
+acting as a higher-level driver for multi-package build workflows.
+
+### Basic usage
+
+```bash
+helper_scripts/batch_build_and_package.py \
+  --source-root <dir>   \  # root folder scanned recursively for debian/ trees
+  --output-dir  <dir>   \  # where .deb / .changes files are written
+  --distro      trixie     # target suite (noble, questing, resolute, trixie, sid)
+```
+
+The combined tarball is written to `<output-dir>/prebuilt_<distro>/combined.tar.gz`.
+
+### Key options
+
+| Option | Description |
+|---|---|
+| `--build-order PKG ...` | Build listed packages first, rest alphabetically |
+| `--order-file FILE` | Same as above but read order from a file (one pkg per line) |
+| `--exclude DIR ...` | Skip directories during discovery (basename, relative, or absolute path) |
+| `--final-tar-output DIR` | Write combined tarball under a different base directory |
+| `--tar-name NAME` | Base name for the combined tarball (default: `combined`) |
+| `--keep-individual-tars` | Retain per-package tarballs after creating the combined one |
+| `--no-update-check` | Skip the remote Docker image update check |
+| `--run-lintian` | Run lintian on each built package |
+| `--extra-repo REPO` | Add an APT repository to the build chroot (repeatable) |
+| `--extra-package PKG` | Add a .deb or directory to the build chroot (repeatable) |
+
+### Example
+
+```bash
+helper_scripts/batch_build_and_package.py \
+  --source-root ~/my-packages \
+  --output-dir  /tmp/build-out \
+  --distro      trixie \
+  --no-update-check \
+  --exclude vendor docs \
+  --build-order pkg-base pkg-lib pkg-app
+```
+
 ## Usage
 
 Run the `docker_deb_build.py` script to build Debian packages:
