@@ -14,6 +14,7 @@ on:
     paths:
       - '.github/workflows/qcom-container-build-and-upload.yml'
       - 'Dockerfiles/**'
+      - 'helper_scripts/**'
 
   push:
     branches:
@@ -22,6 +23,7 @@ on:
     paths:
       - '.github/workflows/qcom-container-build-and-upload.yml'
       - 'Dockerfiles/**'
+      - 'helper_scripts/**'
 
   workflow_dispatch:
 
