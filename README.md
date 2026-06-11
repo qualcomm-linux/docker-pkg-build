@@ -112,6 +112,7 @@ docker_deb_build.py --help
 - **Per-suite Builder Images**: Includes one Dockerfile and one prebuilt sbuild environment per supported suite.
 - **Supported Suites**: Supports Ubuntu `noble`, `questing`, `resolute` and Debian `trixie`, `sid`.
 - **Host-backed `/tmp` option for large builds**: `--mount-host-tmp` bind-mounts host `/tmp` to container `/tmp`.
+- **Repo-local Extra Repositories**: If `<source-dir>/debian/extra-repositories.txt` exists, entries are automatically forwarded to sbuild as `--extra-repository` (supports suite filters like `[noble,questing] ...` and suite placeholders like `{suite}`).
 - **Automated Workflows**: Integrates with GitHub Actions via the `qcom-container-build-and-upload.yml` workflow for CI/CD.
 
 ### Host-backed `/tmp` for large package builds

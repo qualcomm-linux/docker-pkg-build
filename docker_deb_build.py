@@ -22,6 +22,8 @@ import glob
 import grp
 import pwd
 import getpass
+import shlex
+import re
 
 from color_logger import logger
 
@@ -105,7 +107,7 @@ def parse_arguments() -> argparse.Namespace:
                         type=str,
                         action='append',
                         default=[],
-                        help="Additional APT repository to include. Can be specified multiple times. Example: 'deb [arch=arm64 trusted=yes] http://pkg.qualcomm.com noble/stable main'")
+                        help="Additional APT repository to include. Can be specified multiple times. Entries found in debian/extra-repositories.txt are automatically loaded and merged. Example: 'deb [arch=arm64 trusted=yes] http://pkg.qualcomm.com noble/stable main'")
                         
     parser.add_argument("-p", "--extra-package",
                         type=str,
@@ -367,7 +369,96 @@ def make_source_pkg_cmd(sbuild_cmd: str) -> str:
     )
 
 
-def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, distro: str, run_lintian: bool, extra_repo: str, extra_package: str, skip_gbp: bool, mount_host_tmp: bool = False) -> bool:
+def _expand_suite_placeholders(entry: str, suite: str) -> str:
+    """
+    Expand known suite placeholders in an extra-repository entry.
+    """
+    for placeholder in ("{suite}", "{SUITE}", "${suite}", "${SUITE}", "@suite@", "@SUITE@"):
+        entry = entry.replace(placeholder, suite)
+    return entry
+
+
+def load_extra_repositories_from_file(source_dir: str, target_suite: str) -> list:
+    """
+    Load extra apt repositories from debian/extra-repositories.txt in source_dir.
+
+    File format:
+      - one apt repository entry per line
+      - blank lines and lines starting with '#' are ignored
+      - optional suite filter prefix: [suite1,suite2] <repository entry>
+      - suite placeholders are expanded: {suite}, {SUITE}, ${suite}, ${SUITE}, @suite@, @SUITE@
+    """
+    extra_repositories_file = os.path.join(source_dir, "debian", "extra-repositories.txt")
+    repos = []
+    suite = (target_suite or "").strip()
+    if suite == "unstable":
+        suite = "sid"
+
+    if not os.path.isfile(extra_repositories_file):
+        logger.debug(f"No auto extra-repositories file found at: {extra_repositories_file}")
+        return repos
+
+    logger.info(f"Loading extra repositories from {extra_repositories_file}")
+
+    with open(extra_repositories_file, "r", errors="ignore") as f:
+        for line_number, raw_line in enumerate(f, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            repo_entry = line
+            match = re.match(r"^\[([^\]]+)\]\s+(.+)$", line)
+            if match:
+                suite_filters = [item.strip() for item in match.group(1).split(",") if item.strip()]
+                repo_entry = match.group(2).strip()
+                if suite and suite not in suite_filters and "all" not in suite_filters and "*" not in suite_filters:
+                    logger.debug(
+                        f"Skipping extra repository line {line_number}: suite filter {suite_filters} does not include target suite '{suite}'"
+                    )
+                    continue
+
+            repo_entry = _expand_suite_placeholders(repo_entry, suite)
+            repo_entry = repo_entry.strip()
+            if not repo_entry:
+                continue
+
+            repos.append(repo_entry)
+            logger.debug(f"Loaded extra repository line {line_number}: {repo_entry}")
+
+    if not repos:
+        logger.info(f"{extra_repositories_file} contains no active repository entries.")
+
+    return repos
+
+
+def merge_extra_repositories(cli_repos: list, file_repos: list) -> list:
+    """
+    Merge CLI and file-based repositories while preserving order and removing duplicates.
+    CLI-provided repositories keep precedence and ordering.
+    """
+    merged = []
+    seen = set()
+
+    for repo in list(cli_repos) + list(file_repos):
+        if repo in seen:
+            continue
+        merged.append(repo)
+        seen.add(repo)
+
+    return merged
+
+
+def build_package_in_docker(
+    image_name: str,
+    source_dir: str,
+    output_dir: str,
+    distro: str,
+    run_lintian: bool,
+    extra_repo: list,
+    extra_package: list,
+    skip_gbp: bool,
+    mount_host_tmp: bool = False,
+) -> bool:
     """
     Build the debian package inside the given docker image.
     source_dir: path to the debian package source (mounted into the container)
@@ -375,6 +466,7 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
     distro: target distribution string (e.g. 'noble')
     run_lintian: whether to run lintian on the built package
     extra_repo: list of additional APT repositories to include
+    extra_package: list of additional .deb files/directories to pass with --extra-package
     mount_host_tmp: when True, bind-mount host /tmp to container /tmp
     Returns True on success, False on failure.
     """
@@ -388,8 +480,8 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
 
     # Build the gbp command
     # The --git-builder value is a single string passed to gbp
-    extra_repo_option = " ".join(f"--extra-repository='{repo}'" for repo in extra_repo) if extra_repo else ""
-    extra_package_option = " ".join(f"--extra-package='{pkg}'" for pkg in extra_package) if extra_package else ""
+    extra_repo_option = " ".join(f"--extra-repository={shlex.quote(repo)}" for repo in extra_repo) if extra_repo else ""
+    extra_package_option = " ".join(f"--extra-package={shlex.quote(pkg)}" for pkg in extra_package) if extra_package else ""
     lintian_option = '--no-run-lintian' if not run_lintian else ""
     # --no-clean-source: skip dpkg-buildpackage --clean on host (avoids build-dep check outside chroot)
     sbuild_cmd = f"sbuild --no-clean-source --build-dir=/workspace/output --host=arm64 --build=arm64 --dist={distro} {lintian_option} {extra_repo_option} {extra_package_option}"
@@ -571,6 +663,14 @@ def main() -> None:
         if not os.path.isdir("/tmp"):
             raise Exception("--mount-host-tmp requires host /tmp to exist and be a directory")
         logger.debug("Host /tmp is available for bind-mount")
+
+    file_extra_repos = load_extra_repositories_from_file(args.source_dir, args.distro)
+    args.extra_repo = merge_extra_repositories(args.extra_repo, file_extra_repos)
+
+    if args.extra_repo:
+        logger.info(f"Using {len(args.extra_repo)} extra repository entries for this build:")
+        for repo in args.extra_repo:
+            logger.info(f"  - {repo}")
 
     image_name = DOCKER_IMAGE_NAME_FMT.format(suite_name=args.distro)
 
