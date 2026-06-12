@@ -111,7 +111,27 @@ docker_deb_build.py --help
 - **Docker-based Builds**: Packages are built inside isolated Docker containers to ensure reproducibility.
 - **Per-suite Builder Images**: Includes one Dockerfile and one prebuilt sbuild environment per supported suite.
 - **Supported Suites**: Supports Ubuntu `noble`, `questing`, `resolute` and Debian `trixie`, `sid`.
+- **Host-backed `/tmp` option for large builds**: `--mount-host-tmp` bind-mounts host `/tmp` to container `/tmp`.
 - **Automated Workflows**: Integrates with GitHub Actions via the `qcom-container-build-and-upload.yml` workflow for CI/CD.
+
+### Host-backed `/tmp` for large package builds
+
+Some large package builds need more host-backed temporary storage than the
+container default can provide.
+
+Use `--mount-host-tmp` to bind-mount host `/tmp` to container `/tmp`.
+This is particularly relevant for large builds with multi-GB intermediate
+artifacts (for example, `pkg-camx`-sized builds around 20 GB).
+
+For normal/smaller packages, this option is usually not necessary.
+
+```bash
+docker_deb_build.py \
+  --source-dir pkg-camx \
+  --output-dir build \
+  --distro questing \
+  --mount-host-tmp
+```
 
 ### Docker Images
 
