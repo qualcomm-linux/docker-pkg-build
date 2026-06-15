@@ -369,13 +369,14 @@ def make_source_pkg_cmd(sbuild_cmd: str) -> str:
     )
 
 
-def _expand_suite_placeholders(entry: str, suite: str) -> str:
+def _normalize_suite_name(suite_name: str) -> str:
     """
-    Expand known suite placeholders in an extra-repository entry.
+    Normalize suite aliases used in branch/workflow inputs.
     """
-    for placeholder in ("{suite}", "{SUITE}", "${suite}", "${SUITE}", "@suite@", "@SUITE@"):
-        entry = entry.replace(placeholder, suite)
-    return entry
+    suite_name = (suite_name or "").strip()
+    if suite_name == "unstable":
+        return "sid"
+    return suite_name
 
 
 def load_extra_repositories_from_file(source_dir: str, target_suite: str) -> list:
@@ -386,13 +387,10 @@ def load_extra_repositories_from_file(source_dir: str, target_suite: str) -> lis
       - one apt repository entry per line
       - blank lines and lines starting with '#' are ignored
       - optional suite filter prefix: [suite1,suite2] <repository entry>
-      - suite placeholders are expanded: {suite}, {SUITE}, ${suite}, ${SUITE}, @suite@, @SUITE@
     """
     extra_repositories_file = os.path.join(source_dir, "debian", "extra-repositories.txt")
     repos = []
-    suite = (target_suite or "").strip()
-    if suite == "unstable":
-        suite = "sid"
+    suite = _normalize_suite_name(target_suite)
 
     if not os.path.isfile(extra_repositories_file):
         logger.debug(f"No auto extra-repositories file found at: {extra_repositories_file}")
@@ -409,15 +407,26 @@ def load_extra_repositories_from_file(source_dir: str, target_suite: str) -> lis
             repo_entry = line
             match = re.match(r"^\[([^\]]+)\]\s+(.+)$", line)
             if match:
-                suite_filters = [item.strip() for item in match.group(1).split(",") if item.strip()]
+                suite_filters = [
+                    _normalize_suite_name(item.strip())
+                    for item in match.group(1).split(",")
+                    if item.strip()
+                ]
+                if not suite_filters:
+                    raise ValueError(
+                        f"Invalid extra repository line {line_number}: empty suite filter list in '{line}'"
+                    )
                 repo_entry = match.group(2).strip()
-                if suite and suite not in suite_filters and "all" not in suite_filters and "*" not in suite_filters:
+                if suite and suite not in suite_filters:
                     logger.debug(
                         f"Skipping extra repository line {line_number}: suite filter {suite_filters} does not include target suite '{suite}'"
                     )
                     continue
+            elif line.startswith("["):
+                raise ValueError(
+                    f"Invalid extra repository line {line_number}: '{line}'. Expected '[suite1,suite2] deb ...' or a plain 'deb ...' line."
+                )
 
-            repo_entry = _expand_suite_placeholders(repo_entry, suite)
             repo_entry = repo_entry.strip()
             if not repo_entry:
                 continue
