@@ -27,6 +27,7 @@ import subprocess
 import traceback
 
 from color_logger import logger
+from helper_scripts.notice_and_license import resolve_git_context, fetch_notice, fetch_license_qcom2, strip_doc_dirs
 
 # Same image naming convention used by docker_deb_build.py
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
@@ -71,24 +72,18 @@ def parse_arguments():
     # a container to prevent infinite re-invocation.
     parser.add_argument("--_in-docker", dest="in_docker", action="store_true",
                         default=False, help=argparse.SUPPRESS)
+    parser.add_argument("--_notice-project", dest="notice_project", default="",
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--_notice-revision", dest="notice_revision", default="",
+                        help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
 def rerun_in_docker(args, changes_path: str) -> int:
     """
-    Re-invoke this script inside a Docker container so it runs as root.
-    This ensures write access to the output directory regardless of ownership.
-
-    Mounts:
-      <script_dir>      -> /scripts          (read-only: this script + color_logger.py)
-      <work_dir>        -> <work_dir>        (read-write: .changes and .deb files)
-      <base_output_dir> -> <base_output_dir> (read-write: tarball destination)
-
-    work_dir and base_output_dir are mounted at their original absolute paths
-    so all path arguments remain valid unchanged inside the container.
-    If base_output_dir does not yet exist, Docker (running as root) creates it.
-
-    Returns the container's exit code.
+    Re-invoke this script inside a Docker container so it runs as root,
+    ensuring write access to output dirs owned by root after a Docker build.
+    Returns the container exit code.
     """
     if args.docker_image:
         image_name = args.docker_image
@@ -99,16 +94,17 @@ def rerun_in_docker(args, changes_path: str) -> int:
     script_dir      = os.path.dirname(os.path.abspath(__file__))
     work_dir        = os.path.dirname(changes_path)
     base_output_dir = os.path.abspath(args.output_tar) if args.output_tar else work_dir
+    cwd             = os.getcwd()
 
-    # Build a minimal set of data mounts (skip a path already covered by a
-    # parent mount to avoid overlapping -v flags).
-    candidates = sorted({work_dir, base_output_dir})
+    # Deduplicate mounts — skip paths already covered by a parent mount.
+    candidates = sorted({cwd, work_dir, base_output_dir})
     data_mounts = []
     for d in candidates:
         if not any(d == r or d.startswith(r + os.sep) for r in data_mounts):
             data_mounts.append(d)
 
     docker_cmd = ['docker', 'run', '--rm',
+                  '--workdir', cwd,
                   '-v', f'{script_dir}:/scripts:ro,Z']
     for d in data_mounts:
         docker_cmd += ['-v', f'{d}:{d}:Z']
@@ -123,6 +119,10 @@ def rerun_in_docker(args, changes_path: str) -> int:
     if args.docker_image:
         docker_cmd += ['--docker-image', args.docker_image]
     docker_cmd += ['--_in-docker']   # prevent recursive re-invocation
+
+    notice_project, notice_revision = resolve_git_context(changes_path)
+    if notice_project and notice_revision:
+        docker_cmd += ["--_notice-project", notice_project, "--_notice-revision", notice_revision]
 
     logger.info(f"Running create_data_tar.py inside container '{image_name}' ...")
     logger.debug(f"Docker command: {' '.join(docker_cmd)}")
@@ -234,6 +234,11 @@ def create_tar_of_data(work_dir: str, tar_path: str) -> str:
     os.makedirs(os.path.dirname(tar_path) or '.', exist_ok=True)
     with tarfile.open(tar_path, 'w:gz') as tar:
         tar.add(data_root, arcname='data')
+        for filename in ('NOTICE', 'LICENSE.qcom-2'):
+            fpath = os.path.join(work_dir, filename)
+            if os.path.isfile(fpath):
+                tar.add(fpath, arcname=filename)
+                logger.debug(f"Added {filename} to tarball alongside data/")
     return tar_path
 
 
@@ -268,6 +273,15 @@ def main():
     # Extract each deb into data/<pkg>/<arch>/
     ok = extract_debs_to_data(deb_names, work_dir, args.arch)
     if not ok:
+        sys.exit(1)
+
+    # Fetch NOTICE and LICENSE.qcom-2, strip doc dirs.
+    try:
+        fetch_notice(work_dir, args.notice_project, args.notice_revision)
+        fetch_license_qcom2(work_dir)
+        strip_doc_dirs(work_dir)
+    except Exception as e:
+        logger.critical(f"Failed to fetch licensing files: {e}")
         sys.exit(1)
 
     # Create tarball named after the .changes file (e.g., pkg_1.0_arm64.tar.gz)
