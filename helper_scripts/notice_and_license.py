@@ -20,10 +20,6 @@ import subprocess
 import sys
 
 import requests
-import urllib3
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from color_logger import logger
 
@@ -110,7 +106,6 @@ def fetch_notice(work_dir: str, project_name: str, revision: str) -> None:
         NOTICE_API_URL,
         headers={"Content-Type": "application/json"},
         data=json.dumps(payload),
-        verify=False,  # nosemgrep: python.requests.security.disabled-cert-validation.disabled-cert-validation
         timeout=60
     )
     response.raise_for_status()
@@ -126,7 +121,7 @@ def fetch_notice(work_dir: str, project_name: str, revision: str) -> None:
         return
 
     logger.info(f"Downloading NOTICE from: {download_link}")
-    dl_response = requests.get(download_link, verify=False, timeout=120)  # nosemgrep: python.requests.security.disabled-cert-validation.disabled-cert-validation
+    dl_response = requests.get(download_link, timeout=120)
     dl_response.raise_for_status()
 
     with open(os.path.join(work_dir, "NOTICE"), "wb") as nf:
