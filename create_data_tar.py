@@ -25,6 +25,7 @@ import re
 import tarfile
 import subprocess
 import traceback
+import shutil
 
 from color_logger import logger
 from helper_scripts.notice_and_license import resolve_git_context, fetch_notice, fetch_license_qcom2, strip_doc_dirs
@@ -190,7 +191,10 @@ def extract_debs_to_data(deb_names, work_dir, arch) -> bool:
     Returns True if at least one deb was extracted successfully.
     """
     data_root = os.path.join(work_dir, 'data')
-    os.makedirs(data_root, exist_ok=True)
+    if os.path.isdir(data_root):
+        logger.info(f"data/ already exists at {data_root} — clearing before extraction.")
+        shutil.rmtree(data_root)
+    os.makedirs(data_root)
 
     extracted_any = False
     for deb_name in deb_names:
