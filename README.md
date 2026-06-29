@@ -136,7 +136,9 @@ docker_deb_build.py \
 ### Docker Images
 
 To add a new suite, copy an existing suite Dockerfile in `Dockerfiles/` and adapt it for the new release.
-Also add the suite-specific Qualcomm source file under `Dockerfiles/sources/<suite>/qsc-deb-releases.sources`.
+Also add any suite-specific Qualcomm source files under `Dockerfiles/sources/<suite>/`:
+- Ubuntu suites use `qsc-deb-releases.sources`
+- Debian `trixie` uses `qli.sources`
 
 The last step is to ensure the new image is also pushed to GHCR as part of the
 `.github/workflows/qcom-container-build-and-upload.yml` workflow by adding a new line in the

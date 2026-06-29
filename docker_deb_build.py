@@ -26,7 +26,7 @@ import getpass
 from color_logger import logger
 
 # Docker image name template
-# suite_name: 'noble', 'questing', 'sid'
+# suite_name: 'noble', 'questing', 'trixie', 'sid'
 # Example: ghcr.io/qualcomm-linux/pkg-builder:noble
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
 
