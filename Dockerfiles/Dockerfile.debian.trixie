@@ -1,4 +1,4 @@
-# Use an official Ubuntu base image
+# Use an official Debian base image
 FROM debian:trixie
 LABEL org.opencontainers.image.source=https://github.com/qualcomm-linux/docker-pkg-build
 
@@ -14,7 +14,7 @@ RUN apt-get update && \
 
 COPY extra-packages.txt /tmp/extra-packages.txt
 COPY keyrings/ /tmp/keyrings/
-COPY sources/trixie/qsc-deb-releases.sources /tmp/qsc-deb-releases.sources
+COPY sources/trixie/qli.sources /tmp/qli.sources
 
 RUN EXTRA_PACKAGES=$(tr -s '[:space:]' ',' < /tmp/extra-packages.txt) && \
     sbuild-createchroot --include="$EXTRA_PACKAGES" \
@@ -24,8 +24,8 @@ RUN EXTRA_PACKAGES=$(tr -s '[:space:]' ',' < /tmp/extra-packages.txt) && \
                         /srv/chroot/trixie \
                         http://deb.debian.org/debian && \
     mkdir -p /srv/chroot/trixie/etc/apt/keyrings && \
-    cp /tmp/keyrings/qsc-deb-releases.asc /srv/chroot/trixie/etc/apt/keyrings/ && \
-    cp /tmp/qsc-deb-releases.sources /srv/chroot/trixie/etc/apt/sources.list.d/
+    cp /tmp/keyrings/*.asc /srv/chroot/trixie/etc/apt/keyrings/ && \
+    cp /tmp/qli.sources /srv/chroot/trixie/etc/apt/sources.list.d/
                         
 # Set working directory
 WORKDIR /workspace
