@@ -18,8 +18,10 @@ Dockerfiles/
   extra-packages.txt               # Packages installed inside the build chroot
   keyrings/
     qsc-deb-releases.asc           # Qualcomm APT repo PGP public key
+    debusine.asc                   # Qualcomm Debusine qli repo PGP public key
   sources/
-    <distro>/qsc-deb-releases.sources  # Pre-configured Qualcomm APT source entry per distro
+    <ubuntu-distro>/qsc-deb-releases.sources  # QArtifactory source entry
+    <debian-distro>/qli.sources             # Debusine qli source entry
 ```
 
 ## Supported Distros
@@ -41,9 +43,10 @@ Dockerfiles/
   with a plain one that lacks Qualcomm APT sources.
 - **CA certificates in chroot**: The chroot tarball must include `ca-certificates` and `openssl`
   so that HTTPS APT repositories work inside the chroot at build time.
-- **Qualcomm APT key**: All chroots have the Qualcomm PGP key pre-installed at
-  `/etc/apt/keyrings/qsc-deb-releases.asc` and a matching `.sources` file so that packages from
-  `qartifactory-edge.qualcomm.com` are available without `trusted=yes` or `--extra-repo`.
+- **Qualcomm APT sources**:
+  - Ubuntu chroots include `qsc-deb-releases.sources` from `qartifactory-edge.qualcomm.com`.
+  - Debian `trixie` chroots include `qli.sources` from `deb.debusine.qualcomm.com`.
+  - `sid` includes no default Qualcomm source and relies on caller-provided `--extra-repo` when needed.
 
 ## Common Commands
 
