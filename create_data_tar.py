@@ -23,10 +23,12 @@ import argparse
 import glob
 import re
 import tarfile
+import shutil
 import subprocess
 import traceback
 
 from color_logger import logger
+from helper_scripts.notice_and_license import collect_notice, fetch_license_qcom2, strip_doc_dirs
 
 # Same image naming convention used by docker_deb_build.py
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
@@ -190,7 +192,10 @@ def extract_debs_to_data(deb_names, work_dir, arch) -> bool:
     Returns True if at least one deb was extracted successfully.
     """
     data_root = os.path.join(work_dir, 'data')
-    os.makedirs(data_root, exist_ok=True)
+    if os.path.isdir(data_root):
+        shutil.rmtree(data_root)
+        logger.debug(f"Cleared stale data directory: {data_root}")
+    os.makedirs(data_root)
 
     extracted_any = False
     for deb_name in deb_names:
@@ -269,6 +274,11 @@ def main():
     ok = extract_debs_to_data(deb_names, work_dir, args.arch)
     if not ok:
         sys.exit(1)
+
+    # Collect NOTICE/LICENSE files, fetch LICENSE.qcom-2, strip doc dirs.
+    collect_notice(work_dir, changes_path)
+    fetch_license_qcom2(work_dir)
+    strip_doc_dirs(work_dir)
 
     # Create tarball named after the .changes file (e.g., pkg_1.0_arm64.tar.gz)
     try:
