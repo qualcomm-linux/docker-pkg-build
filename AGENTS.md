@@ -28,19 +28,18 @@ Dockerfiles/
 
 | Suite     | OS     | sbuild backend | Chroot format |
 |-----------|--------|----------------|---------------|
-| noble     | Ubuntu | unshare        | `/root/.cache/sbuild/noble-arm64.tar` (mmdebstrap) |
-| questing  | Ubuntu | unshare        | `/root/.cache/sbuild/questing-arm64.tar` (mmdebstrap) |
+| noble     | Ubuntu | schroot        | `/srv/chroot/noble` (sbuild-createchroot) |
+| questing  | Ubuntu | schroot        | `/srv/chroot/questing` (sbuild-createchroot) |
 | resolute  | Ubuntu | unshare        | `/root/.cache/sbuild/resolute-arm64.tar` (mmdebstrap) |
-| trixie    | Debian | unshare        | `/root/.cache/sbuild/trixie-arm64.tar` (mmdebstrap) |
+| trixie    | Debian | schroot        | `/srv/chroot/trixie` (sbuild-createchroot) |
 | sid       | Debian | unshare        | `/root/.cache/sbuild/sid-arm64.tar` (mmdebstrap) |
 
 ## Key Design Decisions
 
-- **Unshare backend**: All Debian/Ubuntu suites in this repo use sbuild's
-  unshare backend with a tarball at
-  `/root/.cache/sbuild/<distro>-<arch>.tar`.
-  Dockerfiles use `mmdebstrap --format=tar` and disable sbuild's unshare
-  auto-regeneration/max-age refresh so the customized tarball is not replaced
+- **schroot vs. unshare**: Newer sbuild versions (resolute, sid) default to the unshare backend,
+  which expects a tarball at `/root/.cache/sbuild/<distro>-<arch>.tar`, not a `/srv/chroot/`
+  directory. Dockerfiles must use `mmdebstrap --format=tar` for these distros, and must disable
+  sbuild's unshare auto-regeneration/max-age refresh so the customized tarball is not replaced
   with a plain one that lacks Qualcomm APT sources.
 - **CA certificates in chroot**: The chroot tarball must include `ca-certificates` and `openssl`
   so that HTTPS APT repositories work inside the chroot at build time.
@@ -69,5 +68,5 @@ docker_deb_build.py -s <source-dir> -o <output-dir> -d <distro> \
 - Changes to `keyrings/` or `sources/` affect **all** distros — check every `.sources` file if
   updating suite names.
 - After any Dockerfile change, the corresponding Docker image must be rebuilt with `--rebuild`.
-- **all Debian/Ubuntu suites**: any change to chroot content requires updating
-  `mmdebstrap` `--customize-hook` or `--include` flags, not post-build copies.
+- **resolute and sid**: any change to the chroot content requires updating the `mmdebstrap`
+  `--customize-hook` or `--include` flags — not a post-build `cp` into `/srv/chroot/`.
