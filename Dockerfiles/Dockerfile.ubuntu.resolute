@@ -53,6 +53,7 @@ RUN EXTRA_PACKAGES=$(tr -s '[:space:]' ',' < /tmp/extra-packages.txt) && \
 # and resolute builds lose qcom-* dependencies from qartifactory.
 RUN mkdir -p /root/.config/sbuild && \
     printf '%s\n' \
+      '$chroot_mode = "unshare";' \
       '$unshare_mmdebstrap_keep_tarball = 1;' \
       '$unshare_mmdebstrap_max_age = -1;' \
       '$unshare_mmdebstrap_auto_create = 0;' \
