@@ -1,0 +1,13 @@
+Source: qcom-ci-dummy
+Section: misc
+Priority: optional
+Maintainer: Qualcomm Linux CI <noreply@qualcomm.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: qcom-ci-dummy
+Architecture: all
+Depends: ${misc:Depends}
+Description: Dummy package for docker-pkg-build CI validation
+ Local package built in CI to validate suite builder images.

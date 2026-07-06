@@ -13,6 +13,7 @@ on:
       - main
     paths:
       - '.github/workflows/qcom-container-build-and-upload.yml'
+      - '.github/dummy-package/**'
       - 'Dockerfiles/**'
 
   push:
@@ -21,6 +22,7 @@ on:
       - develop
     paths:
       - '.github/workflows/qcom-container-build-and-upload.yml'
+      - '.github/dummy-package/**'
       - 'Dockerfiles/**'
 
   workflow_dispatch:
@@ -47,6 +49,25 @@ jobs:
 
       - name: Build Debian Images
         run: ./docker_deb_build.py --rebuild --no-update-check
+
+      - name: Validate Debian Images Using local dummy package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_dir="${GITHUB_WORKSPACE}/.github/dummy-package"
+          output_root="${GITHUB_WORKSPACE}/build/dummy-package"
+
+          for distro in noble questing resolute trixie sid; do
+            output_dir="${output_root}/${distro}"
+            mkdir -p "${output_dir}"
+            echo "Testing image '${distro}' with docker_deb_build.py"
+            ./docker_deb_build.py \
+              --source-dir "${source_dir}" \
+              --output-dir "${output_dir}" \
+              --distro "${distro}" \
+              --no-update-check
+          done
 
       - name: Log in to GHCR
         if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
