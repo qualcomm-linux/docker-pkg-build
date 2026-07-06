@@ -111,6 +111,7 @@ docker_deb_build.py --help
 - **Docker-based Builds**: Packages are built inside isolated Docker containers to ensure reproducibility.
 - **Per-suite Builder Images**: Includes one Dockerfile and one prebuilt sbuild environment per supported suite.
 - **Supported Suites**: Supports Ubuntu `noble`, `questing`, `resolute` and Debian `trixie`, `sid`.
+- **Unified sbuild Backend**: All Debian/Ubuntu suites use sbuild unshare tarballs created with mmdebstrap.
 - **Host-backed `/tmp` option for large builds**: `--mount-host-tmp` bind-mounts host `/tmp` to container `/tmp`.
 - **Automated Workflows**: Integrates with GitHub Actions via the `qcom-container-build-and-upload.yml` workflow for CI/CD.
 
