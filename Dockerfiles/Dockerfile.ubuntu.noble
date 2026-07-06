@@ -22,7 +22,7 @@ RUN EXTRA_PACKAGES=$(tr -s '[:space:]' ',' < /tmp/extra-packages.txt) && \
                         --components=main,universe \
                         noble \
                         /srv/chroot/noble \
-                        http://ports.ubuntu.com && \
+                        https://ports.ubuntu.com && \
     mkdir -p /srv/chroot/noble/etc/apt/keyrings && \
     cp /tmp/keyrings/qsc-deb-releases.asc /srv/chroot/noble/etc/apt/keyrings/ && \
     cp /tmp/qsc-deb-releases.sources /srv/chroot/noble/etc/apt/sources.list.d/
