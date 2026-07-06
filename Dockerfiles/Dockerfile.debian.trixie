@@ -22,7 +22,7 @@ RUN EXTRA_PACKAGES=$(tr -s '[:space:]' ',' < /tmp/extra-packages.txt) && \
                         --components=main,contrib,non-free,non-free-firmware \
                         trixie \
                         /srv/chroot/trixie \
-                        http://deb.debian.org/debian && \
+                        https://deb.debian.org/debian && \
     mkdir -p /srv/chroot/trixie/etc/apt/keyrings && \
     cp /tmp/keyrings/*.asc /srv/chroot/trixie/etc/apt/keyrings/ && \
     cp /tmp/qli.sources /srv/chroot/trixie/etc/apt/sources.list.d/
