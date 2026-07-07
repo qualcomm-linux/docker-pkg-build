@@ -11,19 +11,10 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - '.github/workflows/qcom-container-build-and-upload.yml'
-      - '.github/dummy-package/**'
-      - 'Dockerfiles/**'
 
   push:
     branches:
       - main
-      - develop
-    paths:
-      - '.github/workflows/qcom-container-build-and-upload.yml'
-      - '.github/dummy-package/**'
-      - 'Dockerfiles/**'
 
   workflow_dispatch:
 
