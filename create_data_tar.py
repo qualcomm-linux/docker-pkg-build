@@ -85,6 +85,8 @@ def rerun_in_docker(args, changes_path: str) -> int:
       <script_dir>      -> /scripts          (read-only: this script + color_logger.py)
       <work_dir>        -> <work_dir>        (read-write: .changes and .deb files)
       <base_output_dir> -> <base_output_dir> (read-write: tarball destination)
+      <project_root>    -> <project_root>    (read-write: package source discovery for NOTICE)
+      <invocation_cwd>  -> <invocation_cwd>  (read-write: all folders under $PWD, e.g. .repo/sources/out)
 
     work_dir and base_output_dir are mounted at their original absolute paths
     so all path arguments remain valid unchanged inside the container.
@@ -99,12 +101,15 @@ def rerun_in_docker(args, changes_path: str) -> int:
         image_name = DOCKER_IMAGE_NAME_FMT.format(suite_name=suite)
 
     script_dir      = os.path.dirname(os.path.abspath(__file__))
+    project_root    = os.path.abspath(os.path.join(script_dir, os.pardir))
     work_dir        = os.path.dirname(changes_path)
     base_output_dir = os.path.abspath(args.output_tar) if args.output_tar else work_dir
+    invocation_cwd  = os.path.abspath(os.getcwd())
 
     # Build a minimal set of data mounts (skip a path already covered by a
     # parent mount to avoid overlapping -v flags).
-    candidates = sorted({work_dir, base_output_dir})
+    candidates = {work_dir, base_output_dir, project_root, invocation_cwd}
+    candidates = sorted(candidates)
     data_mounts = []
     for d in candidates:
         if not any(d == r or d.startswith(r + os.sep) for r in data_mounts):
@@ -127,8 +132,6 @@ def rerun_in_docker(args, changes_path: str) -> int:
     docker_cmd += ['--_in-docker']   # prevent recursive re-invocation
 
     logger.info(f"Running create_data_tar.py inside container '{image_name}' ...")
-    logger.debug(f"Docker command: {' '.join(docker_cmd)}")
-
     res = subprocess.run(docker_cmd, check=False)
     return res.returncode
 
@@ -169,7 +172,7 @@ def collect_debs_from_changes(changes_path: str):
         raise RuntimeError(f"Failed to read .changes file {changes_path}: {e}")
 
     # Regex to capture *.deb tokens
-    debs = [fn for _, fn in re.findall(r'(^|\\s)([^\\s]+\\.deb)\\b', text)]
+    debs = [fn for _, fn in re.findall(r'(^|\s)(\S+\.deb)\b', text)]
     if not debs:
         # Fallback: simple tokenization
         for line in text.splitlines():
@@ -194,7 +197,6 @@ def extract_debs_to_data(deb_names, work_dir, arch) -> bool:
     data_root = os.path.join(work_dir, 'data')
     if os.path.isdir(data_root):
         shutil.rmtree(data_root)
-        logger.debug(f"Cleared stale data directory: {data_root}")
     os.makedirs(data_root)
 
     extracted_any = False
@@ -210,7 +212,6 @@ def extract_debs_to_data(deb_names, work_dir, arch) -> bool:
         dest_dir = os.path.join(data_root, pkg, arch)
         os.makedirs(dest_dir, exist_ok=True)
 
-        logger.debug(f"Extracting {deb_path} -> {dest_dir}")
         try:
             subprocess.run(['dpkg-deb', '-x', deb_path, dest_dir], check=True)
             extracted_any = True
@@ -229,17 +230,35 @@ def extract_debs_to_data(deb_names, work_dir, arch) -> bool:
 def create_tar_of_data(work_dir: str, tar_path: str) -> str:
     """
     Create tarball at tar_path containing the data/ directory from work_dir.
+    If present, also include NOTICE and LICENSE.qcom-2 at tar root.
     Returns the path to the tarball on success.
     """
     data_root = os.path.join(work_dir, 'data')
     if not os.path.isdir(data_root):
         raise RuntimeError(f"Missing data directory to archive: {data_root}")
 
-    logger.debug(f"Creating tarball: {tar_path}")
     os.makedirs(os.path.dirname(tar_path) or '.', exist_ok=True)
     with tarfile.open(tar_path, 'w:gz') as tar:
         tar.add(data_root, arcname='data')
+        for filename in ('NOTICE', 'LICENSE.qcom-2'):
+            path = os.path.join(work_dir, filename)
+            if os.path.isfile(path):
+                tar.add(path, arcname=filename)
     return tar_path
+
+
+def remove_stale_metadata_files(work_dir: str) -> None:
+    """
+    Remove stale metadata files from previous runs so we don't archive leftovers
+    when the current package does not generate them.
+    """
+    for filename in ("NOTICE", "LICENSE.qcom-2"):
+        path = os.path.join(work_dir, filename)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError as e:
+                raise RuntimeError(f"Failed to remove stale file '{path}': {e}")
 
 
 def main():
@@ -260,8 +279,13 @@ def main():
 
     # The working directory is where the .changes was generated (and where the debs are expected)
     work_dir = os.path.dirname(changes_path)
-    logger.debug(f"Using .changes file: {changes_path}")
-    logger.debug(f"Working directory: {work_dir}")
+
+    # Remove stale metadata files from previous runs.
+    try:
+        remove_stale_metadata_files(work_dir)
+    except Exception as e:
+        logger.critical(str(e))
+        sys.exit(1)
 
     # Collect debs from the changes file
     try:
