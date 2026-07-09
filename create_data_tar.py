@@ -26,12 +26,18 @@ import tarfile
 import shutil
 import subprocess
 import traceback
+import json
+import urllib.request
+import urllib.parse
+import urllib.error
 
 from color_logger import logger
 from helper_scripts.notice_and_license import collect_notice, fetch_license_qcom2, strip_doc_dirs
 
 # Same image naming convention used by docker_deb_build.py
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
+# Public Qualcomm Artifactory search endpoint used for duplicate-version guard.
+ARTIFACTORY_SEARCH_API = "https://qartifactory-edge.qualcomm.com/artifactory/api/search/artifact"
 
 
 def parse_arguments():
@@ -261,6 +267,98 @@ def remove_stale_metadata_files(work_dir: str) -> None:
                 raise RuntimeError(f"Failed to remove stale file '{path}': {e}")
 
 
+def parse_tar_identity(tar_name: str):
+    """
+    Parse tar name as: <pkg>_<version>_<arch>.tar.gz
+    Returns dict with pkg/version/arch on success, else None.
+    """
+    m = re.match(r'^(?P<pkg>[^_]+)_(?P<version>[^_]+)_(?P<arch>[^_]+)\.tar\.gz$', tar_name)
+    if not m:
+        return None
+    return m.groupdict()
+
+
+def fetch_artifactory_uris(query_name: str):
+    """
+    Query the public Artifactory search API and return list of result URIs.
+    """
+    query = urllib.parse.urlencode({"name": query_name})
+    url = f"{ARTIFACTORY_SEARCH_API}?{query}"
+    if not url.startswith("https://"):
+        raise RuntimeError(f"Refusing to fetch non-HTTPS URL: {url}")
+    req = urllib.request.Request(url)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Artifactory query failed ({e.code}) for {url}: {body}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Failed to reach Artifactory at {url}: {e}") from e
+
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Artifactory response was not valid JSON from {url}") from e
+
+    results = data.get("results", [])
+    if not isinstance(results, list):
+        raise RuntimeError(f"Unexpected Artifactory response shape from {url}: missing list 'results'")
+    uris = []
+    for row in results:
+        if isinstance(row, dict) and isinstance(row.get("uri"), str):
+            uris.append(row["uri"])
+    return uris
+
+
+def fail_if_version_exists_in_artifactory(tar_name: str, args) -> None:
+    """
+    Query Artifactory and fail when the same package version is already present
+    for the same architecture.
+    """
+    identity = parse_tar_identity(tar_name)
+    if identity:
+        query_name = identity["pkg"]
+    else:
+        # Fallback to exact filename search when tar name does not follow
+        # <pkg>_<version>_<arch>.tar.gz.
+        query_name = tar_name
+
+    uris = fetch_artifactory_uris(query_name)
+
+    # Scope duplicate checks to the same distro folder layout used for output:
+    # /prebuilt_<distro>/...
+    filter_re = re.compile(rf"/prebuilt_{re.escape(args.distro)}/") if args.distro else None
+    duplicates = []
+    for uri in uris:
+        if filter_re and not filter_re.search(uri):
+            continue
+        base = os.path.basename(uri)
+        if not base.endswith(".tar.gz"):
+            continue
+        if identity:
+            other = parse_tar_identity(base)
+            if not other:
+                continue
+            if (other["pkg"] == identity["pkg"]
+                    and other["version"] == identity["version"]
+                    and other["arch"] == identity["arch"]):
+                duplicates.append(uri)
+        else:
+            if base == tar_name:
+                duplicates.append(uri)
+
+    if duplicates:
+        examples = "\n".join(f"  - {u}" for u in duplicates[:10])
+        extra = "" if len(duplicates) <= 10 else f"\n  ... and {len(duplicates) - 10} more"
+        raise RuntimeError(
+            "Version already exists in Artifactory; refusing to create tarball.\n"
+            f"  tar_name: {tar_name}\n"
+            f"  matches: {len(duplicates)}\n"
+            f"{examples}{extra}"
+        )
+
+
 def main():
     args = parse_arguments()
 
@@ -279,6 +377,17 @@ def main():
 
     # The working directory is where the .changes was generated (and where the debs are expected)
     work_dir = os.path.dirname(changes_path)
+    base = os.path.basename(changes_path)
+    tar_name = re.sub(r'\.changes$', '.tar.gz', base)
+    if tar_name == base:
+        tar_name = base + '.tar.gz'
+
+    # Remote duplicate guard: fail early if this version already exists.
+    try:
+        fail_if_version_exists_in_artifactory(tar_name, args)
+    except Exception as e:
+        logger.critical(str(e))
+        sys.exit(1)
 
     # Remove stale metadata files from previous runs.
     try:
@@ -306,10 +415,6 @@ def main():
 
     # Create tarball named after the .changes file (e.g., pkg_1.0_arm64.tar.gz)
     try:
-        base = os.path.basename(changes_path)
-        tar_name = re.sub(r'\.changes$', '.tar.gz', base)
-        if tar_name == base:
-            tar_name = base + '.tar.gz'
         # Determine destination tar path based on --output-tar and --distro
         if args.output_tar:
             base_output_dir = os.path.abspath(args.output_tar)
