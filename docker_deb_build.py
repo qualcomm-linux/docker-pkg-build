@@ -89,7 +89,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--mount-host-tmp",
                         action='store_true',
                         default=False,
-                        help="Bind-mount host /tmp to container /tmp. Useful when large builds need host-backed temporary storage.")
+                        help="Bind-mount a host temporary directory to container /tmp. Useful when large builds need host-backed temporary storage.")
+
+    parser.add_argument("--host-tmp-dir",
+                        required=False,
+                        default=None,
+                        help="Host directory to bind-mount as container /tmp (e.g. /var/tmp/sbuild). Implies --mount-host-tmp.")
 
     parser.add_argument("-d", "--distro",
                         type=str,
@@ -141,6 +146,8 @@ def parse_arguments() -> argparse.Namespace:
             raise Exception("--skip-gbp cannot be used with --rebuild mode")
         if args.mount_host_tmp:
             raise Exception("--mount-host-tmp cannot be used with --rebuild mode")
+        if args.host_tmp_dir is not None:
+            raise Exception("--host-tmp-dir cannot be used with --rebuild mode")
 
     else:
         # In build mode, apply defaults for source-dir, output-dir, and distro if not specified
@@ -150,6 +157,8 @@ def parse_arguments() -> argparse.Namespace:
             args.output_dir = ".."
         if args.distro is None:
             raise Exception("--distro is required in build mode (when --rebuild is not used)")
+        if args.host_tmp_dir:
+            args.mount_host_tmp = True
 
     return args
 
@@ -367,7 +376,7 @@ def make_source_pkg_cmd(sbuild_cmd: str) -> str:
     )
 
 
-def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, distro: str, run_lintian: bool, extra_repo: str, extra_package: str, skip_gbp: bool, mount_host_tmp: bool = False) -> bool:
+def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, distro: str, run_lintian: bool, extra_repo: str, extra_package: str, skip_gbp: bool, mount_host_tmp: bool = False, host_tmp_dir: str = "/var/tmp/sbuild") -> bool:
     """
     Build the debian package inside the given docker image.
     source_dir: path to the debian package source (mounted into the container)
@@ -375,7 +384,8 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
     distro: target distribution string (e.g. 'noble')
     run_lintian: whether to run lintian on the built package
     extra_repo: list of additional APT repositories to include
-    mount_host_tmp: when True, bind-mount host /tmp to container /tmp
+    mount_host_tmp: when True, bind-mount host temporary directory to container /tmp
+    host_tmp_dir: host directory to bind-mount as container /tmp
     Returns True on success, False on failure.
     """
 
@@ -450,8 +460,8 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
 
     tmp_mount = []
     if mount_host_tmp:
-        logger.info("Using host-backed /tmp mount from /tmp:/tmp")
-        tmp_mount = ['-v', '/tmp:/tmp:Z']
+        logger.info(f"Using host-backed /tmp mount from {host_tmp_dir}:/tmp")
+        tmp_mount = ['-v', f'{host_tmp_dir}:/tmp:Z']
 
     docker_cmd = [
         'docker', 'run', '--rm', '--privileged', "-t",
@@ -568,10 +578,14 @@ def main() -> None:
         args.output_dir = os.path.abspath(args.output_dir)
     logger.debug(f"The source dir is {args.source_dir}")
     logger.debug(f"The output dir is {args.output_dir}")
+    host_tmp_dir = "/var/tmp/sbuild"
     if args.mount_host_tmp:
-        if not os.path.isdir("/tmp"):
-            raise Exception("--mount-host-tmp requires host /tmp to exist and be a directory")
-        logger.debug("Host /tmp is available for bind-mount")
+        if args.host_tmp_dir:
+            host_tmp_dir = os.path.abspath(args.host_tmp_dir)
+        os.makedirs(host_tmp_dir, exist_ok=True)
+        if not os.path.isdir(host_tmp_dir):
+            raise Exception(f"--mount-host-tmp requires host temporary directory to exist and be a directory: {host_tmp_dir}")
+        logger.debug(f"Host temporary directory is available for bind-mount: {host_tmp_dir}")
 
     image_name = DOCKER_IMAGE_NAME_FMT.format(suite_name=args.distro)
 
@@ -596,6 +610,7 @@ def main() -> None:
         args.extra_package,
         args.skip_gbp,
         args.mount_host_tmp,
+        host_tmp_dir,
     )
 
     if ret:
