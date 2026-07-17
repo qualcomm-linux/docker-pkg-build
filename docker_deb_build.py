@@ -26,9 +26,12 @@ import getpass
 from color_logger import logger
 
 # Docker image name template
-# suite_name: 'noble', 'questing', 'trixie', 'sid'
+# suite_name: 'noble', 'resolute', 'trixie', 'sid'
 # Example: ghcr.io/qualcomm-linux/pkg-builder:noble
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
+
+# Distros excluded from automatic rebuild (e.g. temporarily broken upstream)
+SKIP_REBUILD_DISTROS = {"questing"}
 
 def _discover_available_distros() -> list:
     """
@@ -86,14 +89,14 @@ def parse_arguments() -> argparse.Namespace:
                         default=None,
                         help="Path to the output directory for the built package.")
 
-    parser.add_argument("--mount-host-tmp",
-                        action='store_true',
-                        default=False,
-                        help="Bind-mount host /tmp to container /tmp. Useful when large builds need host-backed temporary storage.")
+    parser.add_argument("--host-tmp-dir",
+                        required=False,
+                        default=None,
+                        help="Host directory to bind-mount as container /tmp (e.g. /var/tmp/sbuild or /tmp). If not specified, no host directory is mounted.")
 
     parser.add_argument("-d", "--distro",
                         type=str,
-                        choices=['noble', 'questing', 'resolute', 'trixie', 'sid'],
+                        choices=['noble', 'resolute', 'trixie', 'sid'],
                         default=None,
                         help="The target distribution for the package build (or rebuild if --rebuild is used). If not specified with --rebuild, all distros will be rebuilt.")
 
@@ -139,8 +142,8 @@ def parse_arguments() -> argparse.Namespace:
             raise Exception("--extra-package cannot be used with --rebuild mode")
         if args.skip_gbp:
             raise Exception("--skip-gbp cannot be used with --rebuild mode")
-        if args.mount_host_tmp:
-            raise Exception("--mount-host-tmp cannot be used with --rebuild mode")
+        if args.host_tmp_dir is not None:
+            raise Exception("--host-tmp-dir cannot be used with --rebuild mode")
 
     else:
         # In build mode, apply defaults for source-dir, output-dir, and distro if not specified
@@ -150,7 +153,6 @@ def parse_arguments() -> argparse.Namespace:
             args.output_dir = ".."
         if args.distro is None:
             raise Exception("--distro is required in build mode (when --rebuild is not used)")
-
     return args
 
 def check_docker_dependencies(timeout: int = 20) -> bool:
@@ -297,6 +299,9 @@ def rebuild_docker_images(distro: str = None) -> None:
         # Rebuild all available debian-based distros
         dockerfiles = []
         for distro in _discover_available_distros():
+            if distro in SKIP_REBUILD_DISTROS:
+                logger.warning(f"Skipping rebuild for '{distro}' (listed in SKIP_REBUILD_DISTROS)")
+                continue
             dockerfile_glob = os.path.join(docker_dir, f'Dockerfile.*.*{distro}')
             dockerfiles.extend(glob.glob(dockerfile_glob))
         dockerfiles = sorted(dockerfiles)
@@ -367,7 +372,7 @@ def make_source_pkg_cmd(sbuild_cmd: str) -> str:
     )
 
 
-def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, distro: str, run_lintian: bool, extra_repo: str, extra_package: str, skip_gbp: bool, mount_host_tmp: bool = False) -> bool:
+def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, distro: str, run_lintian: bool, extra_repo: str, extra_package: str, skip_gbp: bool, host_tmp_dir: str = None) -> bool:
     """
     Build the debian package inside the given docker image.
     source_dir: path to the debian package source (mounted into the container)
@@ -375,7 +380,7 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
     distro: target distribution string (e.g. 'noble')
     run_lintian: whether to run lintian on the built package
     extra_repo: list of additional APT repositories to include
-    mount_host_tmp: when True, bind-mount host /tmp to container /tmp
+    host_tmp_dir: host directory to bind-mount as container /tmp; if None, no host directory is mounted
     Returns True on success, False on failure.
     """
 
@@ -449,9 +454,9 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
         extra_mounts.extend(['-v', f"{abs_path}:{abs_path}:Z"])
 
     tmp_mount = []
-    if mount_host_tmp:
-        logger.info("Using host-backed /tmp mount from /tmp:/tmp")
-        tmp_mount = ['-v', '/tmp:/tmp:Z']
+    if host_tmp_dir:
+        logger.info(f"Using host-backed /tmp mount from {host_tmp_dir}:/tmp")
+        tmp_mount = ['-v', f'{host_tmp_dir}:/tmp:Z']
 
     docker_cmd = [
         'docker', 'run', '--rm', '--privileged', "-t",
@@ -568,10 +573,10 @@ def main() -> None:
         args.output_dir = os.path.abspath(args.output_dir)
     logger.debug(f"The source dir is {args.source_dir}")
     logger.debug(f"The output dir is {args.output_dir}")
-    if args.mount_host_tmp:
-        if not os.path.isdir("/tmp"):
-            raise Exception("--mount-host-tmp requires host /tmp to exist and be a directory")
-        logger.debug("Host /tmp is available for bind-mount")
+    if args.host_tmp_dir:
+        args.host_tmp_dir = os.path.abspath(args.host_tmp_dir)
+        os.makedirs(args.host_tmp_dir, exist_ok=True)
+        logger.debug(f"Host temporary directory is available for bind-mount: {args.host_tmp_dir}")
 
     image_name = DOCKER_IMAGE_NAME_FMT.format(suite_name=args.distro)
 
@@ -586,17 +591,22 @@ def main() -> None:
     else:
         logger.info(f"Docker image '{image_name}' is present locally.")
 
-    ret = build_package_in_docker(
-        image_name,
-        args.source_dir,
-        args.output_dir,
-        args.distro,
-        args.run_lintian,
-        args.extra_repo,
-        args.extra_package,
-        args.skip_gbp,
-        args.mount_host_tmp,
-    )
+    try:
+        ret = build_package_in_docker(
+            image_name,
+            args.source_dir,
+            args.output_dir,
+            args.distro,
+            args.run_lintian,
+            args.extra_repo,
+            args.extra_package,
+            args.skip_gbp,
+            args.host_tmp_dir,
+        )
+    finally:
+        if args.host_tmp_dir:
+            logger.debug(f"Cleaning up host temporary directory: {args.host_tmp_dir}")
+            shutil.rmtree(args.host_tmp_dir, ignore_errors=True)
 
     if ret:
         sys.exit(0)

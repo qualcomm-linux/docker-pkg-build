@@ -112,7 +112,7 @@ docker_deb_build.py --help
 - **Per-suite Builder Images**: Includes one Dockerfile and one prebuilt sbuild environment per supported suite.
 - **Supported Suites**: Supports Ubuntu `noble`, `questing`, `resolute` and Debian `trixie`, `sid`.
 - **Unified sbuild Backend**: All Debian/Ubuntu suites use sbuild unshare tarballs created with mmdebstrap.
-- **Host-backed `/tmp` option for large builds**: `--mount-host-tmp` bind-mounts host `/tmp` to container `/tmp`.
+- **Host-backed `/tmp` option for large builds**: `--host-tmp-dir` bind-mounts a host directory to container `/tmp`.
 - **Automated Workflows**: Integrates with GitHub Actions via the `qcom-container-build-and-upload.yml` workflow for CI/CD.
 
 ### Host-backed `/tmp` for large package builds
@@ -120,7 +120,8 @@ docker_deb_build.py --help
 Some large package builds need more host-backed temporary storage than the
 container default can provide.
 
-Use `--mount-host-tmp` to bind-mount host `/tmp` to container `/tmp`.
+Use `--host-tmp-dir` to bind-mount a host directory to container `/tmp`.
+The directory is created automatically if it does not exist, and removed after the build completes.
 This is particularly relevant for large builds with multi-GB intermediate
 artifacts (for example, `pkg-camx`-sized builds around 20 GB).
 
@@ -131,7 +132,7 @@ docker_deb_build.py \
   --source-dir pkg-camx \
   --output-dir build \
   --distro questing \
-  --mount-host-tmp
+  --host-tmp-dir /var/tmp/sbuild
 ```
 
 ### Docker Images
