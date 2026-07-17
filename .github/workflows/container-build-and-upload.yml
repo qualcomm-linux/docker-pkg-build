@@ -49,7 +49,7 @@ jobs:
           source_dir="${GITHUB_WORKSPACE}/.github/dummy-package"
           output_root="${GITHUB_WORKSPACE}/build/dummy-package"
 
-          for distro in noble questing resolute trixie sid; do
+          for distro in noble resolute trixie sid; do
             output_dir="${output_root}/${distro}"
             mkdir -p "${output_dir}"
             echo "Testing image '${distro}' with docker_deb_build.py"
@@ -74,7 +74,6 @@ jobs:
         run: |
           # UBUNTU IMAGES
           docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:noble
-          docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:questing
           docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:resolute
 
           # DEBIAN IMAGES
