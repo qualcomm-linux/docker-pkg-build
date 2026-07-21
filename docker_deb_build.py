@@ -398,7 +398,8 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
     lintian_option = '--no-run-lintian' if not run_lintian else ""
     # --no-clean-source: skip dpkg-buildpackage --clean on host (avoids build-dep check outside chroot)
     # --chroot-mode=unshare: force using the mmdebstrap tarball chroot path for all supported suites.
-    sbuild_cmd = f"sbuild --chroot-mode=unshare --no-clean-source --build-dir=/workspace/output --host=arm64 --build=arm64 --dist={distro} {lintian_option} {extra_repo_option} {extra_package_option}"
+    # --build-dep-resolver=aptitude: use non-default resolver that will accept alternate build-dependencies (Build-Depends: new-name | old-name)
+    sbuild_cmd = f"sbuild --chroot-mode=unshare --build-dep-resolver=aptitude --no-clean-source --build-dir=/workspace/output --host=arm64 --build=arm64 --dist={distro} {lintian_option} {extra_repo_option} {extra_package_option}"
 
     # Ensure git inside the container treats the mounted checkout as safe
     git_safe_cmd = "git config --global --add safe.directory /workspace/src"
