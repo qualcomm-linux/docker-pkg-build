@@ -403,7 +403,69 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
 
     # Ensure git inside the container treats the mounted checkout as safe
     git_safe_cmd = "git config --global --add safe.directory /workspace/src"
-    gbp_cmd = f"{git_safe_cmd} && gbp buildpackage --git-no-pristine-tar --git-ignore-branch --git-builder=\"{sbuild_cmd}\""
+
+    # For packages with debian/watch (prebuilt binaries from Artifactory):
+    # mirror the action.yml / debusine-action two-step pattern:
+    #   1. uscan fetches the orig tarball into /workspace (parent of /workspace/src)
+    #   2. gbp buildpackage -S --git-no-create-orig produces the .dsc
+    #   3. sbuild builds binaries from the .dsc
+    # For packages without debian/watch, gbp creates the orig from git as usual.
+    watch_file = os.path.join(source_dir, "debian", "watch")
+    # Only use the uscan fetch path for prebuilt binary packages that pull
+    # their upstream tarball from Artifactory. Packages with a watch file
+    # pointing to a git forge (GitHub, etc.) have their orig tarball created
+    # by gbp from the upstream git tag — the normal gbp path handles those.
+    has_watch = False
+    if os.path.exists(watch_file):
+        try:
+            with open(watch_file, "r", errors="ignore") as wf:
+                watch_content = wf.read()
+            if "qartifactory" in watch_content:
+                has_watch = True
+                logger.info("debian/watch (Artifactory) found — will fetch orig tarball via uscan inside container")
+            else:
+                logger.debug("debian/watch found but not Artifactory — gbp will handle orig tarball from git")
+        except Exception:
+            pass
+
+    if has_watch:
+        gbp_orig_flag = "--git-no-create-orig"
+        uscan_step = (
+            "cd /workspace/src && "
+            "uscan --no-symlink --destdir /workspace --download-current-version && "
+            "cd /workspace/src"
+        )
+    else:
+        gbp_orig_flag = "--git-no-pristine-tar"
+        uscan_step = None
+
+    def _make_gbp_cmd() -> str:
+        gbp = (
+            f"{git_safe_cmd} && "
+            f"gbp buildpackage -S -sa -d -nc "
+            f"--git-builder=dpkg-buildpackage "
+            f"--git-ignore-branch "
+            f"--git-debian-branch=HEAD "
+            f"--git-ignore-new "
+            f"{gbp_orig_flag} "
+            "--source-option=--extend-diff-ignore=^\\.github "
+            f"-us -uc"
+        )
+        pkg_ver = (
+            "PKG=$(dpkg-parsechangelog -l /workspace/src/debian/changelog -S Source) && "
+            "VER=$(dpkg-parsechangelog -l /workspace/src/debian/changelog -S Version)"
+        )
+        dsc_check = (
+            "DSC=$(ls /workspace/${PKG}_${VER}.dsc 2>/dev/null | head -1) && "
+            "[ -n \"$DSC\" ] || { echo \"ERROR: .dsc not found\"; exit 1; }"
+        )
+        steps = f"set -e; cd /workspace/src; {pkg_ver}; "
+        if uscan_step:
+            steps += f"{uscan_step}; "
+        steps += f"{gbp}; cd /workspace; {dsc_check}; {sbuild_cmd} \"$DSC\""
+        return steps
+
+    gbp_cmd = _make_gbp_cmd()
 
     # Decide which build command to run based on debian/source/format in the source tree.
     # Prefer 'native' -> run sbuild directly. If the source format uses 'quilt', use gbp.
