@@ -387,7 +387,6 @@ def main():
         fail_if_version_exists_in_artifactory(tar_name, args)
     except Exception as e:
         logger.critical(str(e))
-        sys.exit(1)
 
     # Remove stale metadata files from previous runs.
     try:
