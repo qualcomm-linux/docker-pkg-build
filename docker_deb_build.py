@@ -432,7 +432,7 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
         gbp_orig_flag = "--git-no-create-orig"
         uscan_step = (
             "cd /workspace/src && "
-            "uscan --no-symlink --destdir /workspace --download-current-version && "
+            "uscan --destdir /workspace --download-current-version && "
             "cd /workspace/src"
         )
     else:
