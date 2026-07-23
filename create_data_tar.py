@@ -236,7 +236,9 @@ def extract_debs_to_data(deb_names, work_dir, arch) -> bool:
 def create_tar_of_data(work_dir: str, tar_path: str) -> str:
     """
     Create tarball at tar_path containing the data/ directory from work_dir.
-    If present, also include NOTICE and LICENSE.qcom-2 at tar root.
+    If present, also include NOTICE and LICENSE.qcom-2 inside data/ so the
+    tarball has a single top-level directory that tools like origtargz can
+    strip cleanly.
     Returns the path to the tarball on success.
     """
     data_root = os.path.join(work_dir, 'data')
@@ -249,7 +251,7 @@ def create_tar_of_data(work_dir: str, tar_path: str) -> str:
         for filename in ('NOTICE', 'LICENSE.qcom-2'):
             path = os.path.join(work_dir, filename)
             if os.path.isfile(path):
-                tar.add(path, arcname=filename)
+                tar.add(path, arcname=os.path.join('data', filename))
     return tar_path
 
 
