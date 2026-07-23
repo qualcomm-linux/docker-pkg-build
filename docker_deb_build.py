@@ -31,7 +31,7 @@ from color_logger import logger
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
 
 # Distros excluded from automatic rebuild (e.g. temporarily broken upstream)
-SKIP_REBUILD_DISTROS = {"questing"}
+SKIP_REBUILD_DISTROS = {"questing", "sid"}
 
 def _discover_available_distros() -> list:
     """
