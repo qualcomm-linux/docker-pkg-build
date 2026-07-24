@@ -8,7 +8,8 @@ create_data_tar.py
 Standalone utility to:
 - Locate a .changes file via --path-to-changes (file path or directory; if directory, the newest .changes is selected)
 - Extract each referenced .deb into data/<pkg>/<arch>/ under the directory containing the .changes file
-- Pack the data/ directory as <changes_basename>.tar.gz
+- Pack the data/ directory as <changes_basename>.tar.gz, rooted at
+  `<pkg>-<version>/` (or legacy `data/` for `resolute`; see --no-legacy-data-dir).
 - Place the tarball under <output-tar>/prebuilt_<distro>/ when --output-tar and --distro are provided; otherwise follow the fallback rules described in --output-tar help.
 
 By default the script re-invokes itself inside a Docker container (as root) so
@@ -38,6 +39,8 @@ from helper_scripts.notice_and_license import collect_notice, fetch_license_qcom
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
 # Public Qualcomm Artifactory search endpoint used for duplicate-version guard.
 ARTIFACTORY_SEARCH_API = "https://qartifactory-edge.qualcomm.com/artifactory/api/search/artifact"
+# Distro that defaults to the legacy top-level 'data/' tar naming; see --no-legacy-data-dir.
+LEGACY_DATA_DIR_DISTRO = "resolute"
 
 
 def parse_arguments():
@@ -74,6 +77,14 @@ def parse_arguments():
         default="",
         help="Docker image to use when running inside a container. "
              "Defaults to ghcr.io/qualcomm-linux/pkg-builder:<distro>."
+    )
+    parser.add_argument(
+        "--no-legacy-data-dir",
+        dest="no_legacy_data_dir",
+        action="store_true",
+        default=False,
+        help=f"Use <pkg>-<version> tar naming for --distro {LEGACY_DATA_DIR_DISTRO} "
+             "instead of the legacy 'data/' default. No effect for other distros."
     )
     # Internal flag: set automatically when the script is already running inside
     # a container to prevent infinite re-invocation.
@@ -135,6 +146,8 @@ def rerun_in_docker(args, changes_path: str) -> int:
         docker_cmd += ['--distro', args.distro]
     if args.docker_image:
         docker_cmd += ['--docker-image', args.docker_image]
+    if args.no_legacy_data_dir:
+        docker_cmd += ['--no-legacy-data-dir']
     docker_cmd += ['--_in-docker']   # prevent recursive re-invocation
 
     logger.info(f"Running create_data_tar.py inside container '{image_name}' ...")
@@ -233,12 +246,10 @@ def extract_debs_to_data(deb_names, work_dir, arch) -> bool:
     return True
 
 
-def create_tar_of_data(work_dir: str, tar_path: str) -> str:
+def create_tar_of_data(work_dir: str, tar_path: str, top_dir: str = 'data') -> str:
     """
-    Create tarball at tar_path containing the data/ directory from work_dir.
-    If present, also include NOTICE and LICENSE.qcom-2 inside data/ so the
-    tarball has a single top-level directory that tools like origtargz can
-    strip cleanly.
+    Create tarball at tar_path from work_dir/data/, rooted at top_dir inside
+    the archive. Also includes NOTICE and LICENSE.qcom-2 under top_dir if present.
     Returns the path to the tarball on success.
     """
     data_root = os.path.join(work_dir, 'data')
@@ -247,11 +258,11 @@ def create_tar_of_data(work_dir: str, tar_path: str) -> str:
 
     os.makedirs(os.path.dirname(tar_path) or '.', exist_ok=True)
     with tarfile.open(tar_path, 'w:gz') as tar:
-        tar.add(data_root, arcname='data')
+        tar.add(data_root, arcname=top_dir)
         for filename in ('NOTICE', 'LICENSE.qcom-2'):
             path = os.path.join(work_dir, filename)
             if os.path.isfile(path):
-                tar.add(path, arcname=os.path.join('data', filename))
+                tar.add(path, arcname=os.path.join(top_dir, filename))
     return tar_path
 
 
@@ -417,6 +428,20 @@ def main():
 
     # Create tarball named after the .changes file (e.g., pkg_1.0_arm64.tar.gz)
     try:
+        # Legacy 'data/' naming for LEGACY_DATA_DIR_DISTRO unless overridden;
+        # '<pkg>-<version>/' for everything else.
+        identity = parse_tar_identity(tar_name)
+        new_top_dir = f"{identity['pkg']}-{identity['version']}" if identity else 'data'
+        if args.distro == LEGACY_DATA_DIR_DISTRO and not args.no_legacy_data_dir:
+            top_dir = 'data'
+        else:
+            top_dir = new_top_dir
+        if args.no_legacy_data_dir and args.distro != LEGACY_DATA_DIR_DISTRO:
+            logger.warning(
+                f"--no-legacy-data-dir has no effect for distro '{args.distro}'; "
+                "new naming is already the default."
+            )
+
         # Determine destination tar path based on --output-tar and --distro
         if args.output_tar:
             base_output_dir = os.path.abspath(args.output_tar)
@@ -426,7 +451,7 @@ def main():
             # Fallback to work_dir if no explicit output tar path is provided
             dest_dir = os.path.join(work_dir, f'prebuilt_{args.distro}') if args.distro else work_dir
             tar_path = os.path.join(dest_dir, tar_name)
-        tar_path = create_tar_of_data(work_dir, tar_path)
+        tar_path = create_tar_of_data(work_dir, tar_path, top_dir)
         logger.info(f"Created tarball: {tar_path}")
     except Exception as e:
         logger.critical(f"Failed to create tarball: {e}")
