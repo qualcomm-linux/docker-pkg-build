@@ -29,6 +29,8 @@ from color_logger import logger
 # suite_name: 'noble', 'resolute', 'trixie', 'sid'
 # Example: ghcr.io/qualcomm-linux/pkg-builder:noble
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
+# Debian/Ubuntu suites currently supported by this wrapper for package builds.
+SUPPORTED_DEB_DISTROS = ("noble", "resolute", "trixie", "sid")
 
 def _discover_available_distros() -> list:
     """
@@ -93,7 +95,7 @@ def parse_arguments() -> argparse.Namespace:
 
     parser.add_argument("-d", "--distro",
                         type=str,
-                        choices=['noble', 'resolute', 'trixie', 'sid'],
+                        choices=SUPPORTED_DEB_DISTROS,
                         default=None,
                         help="The target distribution for the package build (or rebuild if --rebuild is used). If not specified with --rebuild, all distros will be rebuilt.")
 
@@ -293,9 +295,14 @@ def rebuild_docker_images(distro: str = None) -> None:
             raise Exception(f"No Dockerfile found for distro={distro}")
         logger.info(f"Rebuilding docker image for {distro}: {dockerfiles}")
     else:
-        # Rebuild all available debian-based distros
+        # Rebuild all currently supported debian-based distros.
         dockerfiles = []
         for distro in _discover_available_distros():
+            if distro not in SUPPORTED_DEB_DISTROS:
+                logger.warning(
+                    f"Skipping rebuild for unsupported distro '{distro}'"
+                )
+                continue
             dockerfile_glob = os.path.join(docker_dir, f'Dockerfile.*.*{distro}')
             dockerfiles.extend(glob.glob(dockerfile_glob))
         dockerfiles = sorted(dockerfiles)
