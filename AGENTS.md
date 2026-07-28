@@ -29,9 +29,9 @@ Dockerfiles/
 | Suite     | OS     | sbuild backend | Chroot format |
 |-----------|--------|----------------|---------------|
 | noble     | Ubuntu | unshare        | `/root/.cache/sbuild/noble-arm64.tar` (mmdebstrap) |
-| questing  | Ubuntu | unshare        | `/root/.cache/sbuild/questing-arm64.tar` (mmdebstrap) |
 | resolute  | Ubuntu | unshare        | `/root/.cache/sbuild/resolute-arm64.tar` (mmdebstrap) |
 | trixie    | Debian | unshare        | `/root/.cache/sbuild/trixie-arm64.tar` (mmdebstrap) |
+| forky     | Debian | unshare        | `/root/.cache/sbuild/forky-arm64.tar` (mmdebstrap) |
 | sid       | Debian | unshare        | `/root/.cache/sbuild/sid-arm64.tar` (mmdebstrap) |
 
 ## Key Design Decisions
@@ -46,7 +46,7 @@ Dockerfiles/
   so that HTTPS APT repositories work inside the chroot at build time.
 - **Qualcomm APT sources**:
   - Ubuntu chroots include `qsc-deb-releases.sources` from `qartifactory-edge.qualcomm.com`.
-  - Debian `trixie` chroots include `qli.sources` from `deb.debusine.qualcomm.com`.
+  - Debian `trixie` and `forky` chroots include `qli.sources` from `deb.debusine.qualcomm.com`.
   - `sid` includes no default Qualcomm source and relies on caller-provided `--extra-repo` when needed.
 
 ## Common Commands

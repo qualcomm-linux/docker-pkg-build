@@ -1,7 +1,7 @@
 # docker-pkg-build
 
 A Python-based tool for building Debian packages inside Docker containers, designed for Qualcomm Linux projects.
-It supports ARM64 package builds across Ubuntu and Debian suites (`noble`, `questing`, `resolute`, `trixie`, and `sid`) to ensure consistent and reproducible package builds.
+It supports ARM64 package builds across Ubuntu and Debian suites (`noble`, `resolute`, `trixie`, `forky`, and `sid`) to ensure consistent and reproducible package builds.
 
 This repo encompases two use cases: 
 - Builder-agnostic local builds for a users wanting to build debian packages on their local machines in a repeatable way.
@@ -57,9 +57,9 @@ You should then see the following:
 $ docker image ls
 REPOSITORY                                                                     TAG                  IMAGE ID       CREATED             SIZE
 ghcr.io/qualcomm-linux/pkg-builder                                             noble                bdbf1ec3b9bf   2 hours ago         1.25GB
-ghcr.io/qualcomm-linux/pkg-builder                                             questing             ac7b0936a006   About an hour ago   1.32GB
 ghcr.io/qualcomm-linux/pkg-builder                                             resolute             c41a1b076a1b   About an hour ago   1.35GB
 ghcr.io/qualcomm-linux/pkg-builder                                             trixie               d00e2414b324   2 hours ago         1.47GB
+ghcr.io/qualcomm-linux/pkg-builder                                             forky                7dbd93bc2e4d   About an hour ago   1.49GB
 ghcr.io/qualcomm-linux/pkg-builder                                             sid                  8090ef2d71cc   About an hour ago   1.52GB
 ```
 
@@ -95,7 +95,7 @@ git clone git@github.com:qualcomm-linux/pkg-example.git
 
 mkdir build
 
-debb --source-dir pkg-example --output-dir build --distro questing
+debb --source-dir pkg-example --output-dir build --distro resolute
 ```
 
 ## Usage
@@ -110,7 +110,7 @@ docker_deb_build.py --help
 
 - **Docker-based Builds**: Packages are built inside isolated Docker containers to ensure reproducibility.
 - **Per-suite Builder Images**: Includes one Dockerfile and one prebuilt sbuild environment per supported suite.
-- **Supported Suites**: Supports Ubuntu `noble`, `questing`, `resolute` and Debian `trixie`, `sid`.
+- **Supported Suites**: Supports Ubuntu `noble`, `resolute` and Debian `trixie`, `forky`, `sid`.
 - **Unified sbuild Backend**: All Debian/Ubuntu suites use sbuild unshare tarballs created with mmdebstrap.
 - **Host-backed `/tmp` option for large builds**: `--host-tmp-dir` bind-mounts a host directory to container `/tmp`.
 - **Automated Workflows**: Integrates with GitHub Actions via the `qcom-container-build-and-upload.yml` workflow for CI/CD.
@@ -131,7 +131,7 @@ For normal/smaller packages, this option is usually not necessary.
 docker_deb_build.py \
   --source-dir pkg-camx \
   --output-dir build \
-  --distro questing \
+  --distro resolute \
   --host-tmp-dir /var/tmp/sbuild
 ```
 
@@ -140,23 +140,25 @@ docker_deb_build.py \
 To add a new suite, copy an existing suite Dockerfile in `Dockerfiles/` and adapt it for the new release.
 Also add any suite-specific Qualcomm source files under `Dockerfiles/sources/<suite>/`:
 - Ubuntu suites use `qsc-deb-releases.sources`
-- Debian `trixie` uses `qli.sources`
+- Debian `trixie` and `forky` use `qli.sources`
 
 The last step is to ensure the new image is also pushed to GHCR as part of the
-`.github/workflows/qcom-container-build-and-upload.yml` workflow by adding a new line in the
+`.github/workflows/container-build-and-upload.yml` workflow by adding a new line in the
 `Upload Debian Images` step:
 ```
 docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:noble
-docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:questing
 docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:resolute
 docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:trixie
+docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:forky
 docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:sid
 # Add one more line for the new suite
 ```
+`sid` is best-effort in this workflow. If sid build or validation fails, CI
+continues with the remaining suites and sid push is skipped.
 
 ### GitHub Workflow
 
-The repository includes a `qcom-container-build-and-upload.yml` workflow (located in `.github/workflows/`) that automates building and uploading Docker containers for package builds.
+The repository includes a `container-build-and-upload.yml` workflow (located in `.github/workflows/`) that automates building and uploading Docker containers for package builds.
 This workflow is automatically executed every week so that the GHCR registry where the images are stored contains a one-week-or-less old image. This keeps build time as small as possible for workflows relying on those images. This is because when building using sbuild, the first step is doing an apt update; the older the image, the longer it takes doing this apt upgrade.
 
 This also applies for non-github-workflow local builds; doing a **docker_deb_build.py --rebuild** periodically ensures a recent image and reduces the apt upgrade time at the start of every build.
@@ -171,7 +173,7 @@ For whatever reason, you may have to enter the container in interactive mode. It
 Note: adapt the suite name and mounted paths for your scenario.
 
 ```
-docker run --rm -it --privileged -v /local/mnt/workspace/sbeaudoi/extra-repo/libdmabufheap-1.0.r1.03200:/workspace/src:Z -v /local/mnt/workspace/sbeaudoi/extra-repo/build:/workspace/output:Z -w /workspace/src --name pkg-builder-questing ghcr.io/qualcomm-linux/pkg-builder:questing bash
+docker run --rm -it --privileged -v /local/mnt/workspace/sbeaudoi/extra-repo/libdmabufheap-1.0.r1.03200:/workspace/src:Z -v /local/mnt/workspace/sbeaudoi/extra-repo/build:/workspace/output:Z -w /workspace/src --name pkg-builder-resolute ghcr.io/qualcomm-linux/pkg-builder:resolute bash
 ```
 
 ## Development

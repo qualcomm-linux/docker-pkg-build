@@ -41,25 +41,60 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Build Debian Images
-        run: ./docker_deb_build.py --rebuild --no-update-check
+        shell: bash
+        run: |
+          set -euo pipefail
+          sid_failed_marker="${RUNNER_TEMP}/sid-build-failed"
+
+          # Fresh marker for this job run
+          rm -f "${sid_failed_marker}"
+
+          for distro in noble resolute trixie forky sid; do
+            echo "Building image '${distro}'"
+            if [[ "${distro}" == "sid" ]]; then
+              if ! ./docker_deb_build.py --rebuild --distro "${distro}" --no-update-check; then
+                echo "sid build failed; continuing without sid."
+                touch "${sid_failed_marker}"
+              fi
+            else
+              ./docker_deb_build.py --rebuild --distro "${distro}" --no-update-check
+            fi
+          done
 
       - name: Validate Debian Images Using local dummy package
         shell: bash
         run: |
           set -euo pipefail
+          sid_failed_marker="${RUNNER_TEMP}/sid-build-failed"
 
           source_dir="${GITHUB_WORKSPACE}/.github/dummy-package"
           output_root="${GITHUB_WORKSPACE}/build/dummy-package"
 
-          for distro in noble resolute trixie sid; do
+          for distro in noble resolute trixie forky sid; do
+            if [[ "${distro}" == "sid" && -f "${sid_failed_marker}" ]]; then
+              echo "Skipping sid validation because sid image build failed."
+              continue
+            fi
+
             output_dir="${output_root}/${distro}"
             mkdir -p "${output_dir}"
             echo "Testing image '${distro}' with docker_deb_build.py"
-            ./docker_deb_build.py \
-              --source-dir "${source_dir}" \
-              --output-dir "${output_dir}" \
-              --distro "${distro}" \
-              --no-update-check
+            if [[ "${distro}" == "sid" ]]; then
+              if ! ./docker_deb_build.py \
+                --source-dir "${source_dir}" \
+                --output-dir "${output_dir}" \
+                --distro "${distro}" \
+                --no-update-check; then
+                echo "sid validation failed; continuing without sid."
+                touch "${sid_failed_marker}"
+              fi
+            else
+              ./docker_deb_build.py \
+                --source-dir "${source_dir}" \
+                --output-dir "${output_dir}" \
+                --distro "${distro}" \
+                --no-update-check
+            fi
           done
 
       - name: Log in to GHCR
@@ -73,14 +108,22 @@ jobs:
       - name: Upload Debian Images
         # Only upload on trusted events that land code on main
         if: ${{ github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+        shell: bash
         run: |
+          sid_failed_marker="${RUNNER_TEMP}/sid-build-failed"
+
           # UBUNTU IMAGES
           docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:noble
           docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:resolute
 
           # DEBIAN IMAGES
           docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:trixie
-          docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:sid
+          docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:forky
+          if [[ -f "${sid_failed_marker}" ]]; then
+            echo "Skipping sid push because sid build/validation failed."
+          else
+            docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:sid
+          fi
 
   build-rpm-arm64:
     permissions:

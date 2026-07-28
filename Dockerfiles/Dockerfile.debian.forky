@@ -1,0 +1,56 @@
+# Use an official Debian base image
+FROM debian:forky
+LABEL org.opencontainers.image.source=https://github.com/qualcomm-linux/docker-pkg-build
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+COPY base-packages.txt /tmp/base-packages.txt
+
+RUN apt-get update && \
+    apt-get install -y $(cat /tmp/base-packages.txt | tr '\n' ' ') && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# sbuild on forky is standardized on the "unshare" backend which requires:
+#   uidmap      - newuidmap/newgidmap for user-namespace id mapping
+#   mmdebstrap  - used below to create the chroot tarball
+# Also provision subuid/subgid ranges for root so unshare can map ids.
+RUN apt-get update && \
+    apt-get install -y uidmap mmdebstrap && \
+    if ! grep -q '^root:100000:65536$' /etc/subuid; then \
+        echo 'root:100000:65536' | tee -a /etc/subuid; \
+    fi && \
+    if ! grep -q '^root:100000:65536$' /etc/subgid; then \
+        echo 'root:100000:65536' | tee -a /etc/subgid; \
+    fi
+
+COPY extra-packages.txt /tmp/extra-packages.txt
+COPY keyrings/ /tmp/keyrings/
+COPY sources/forky/qli.sources /tmp/qli.sources
+
+RUN EXTRA_PACKAGES=$(tr -s '[:space:]' ',' < /tmp/extra-packages.txt) && \
+    mkdir -p /root/.cache/sbuild && \
+    mmdebstrap --variant=buildd \
+               --arch=arm64 \
+               --include="$EXTRA_PACKAGES" \
+               --skip=output/mknod \
+               --format=tar \
+               --components=main,contrib,non-free,non-free-firmware \
+               --customize-hook='mkdir -p "$1/etc/apt/keyrings" && cp /tmp/keyrings/*.asc "$1/etc/apt/keyrings/" && mkdir -p "$1/etc/apt/sources.list.d" && cp /tmp/qli.sources "$1/etc/apt/sources.list.d/"' \
+               forky \
+               /root/.cache/sbuild/forky-arm64.tar
+
+RUN mkdir -p /root/.config/sbuild && \
+    printf '%s\n' \
+      '$chroot_mode = "unshare";' \
+      '$unshare_mmdebstrap_keep_tarball = 1;' \
+      '$unshare_mmdebstrap_max_age = -1;' \
+      '$unshare_mmdebstrap_auto_create = 0;' \
+      > /root/.config/sbuild/config.pl
+
+# Set working directory
+WORKDIR /workspace
+
+# Default command
+CMD [ "bash" ]

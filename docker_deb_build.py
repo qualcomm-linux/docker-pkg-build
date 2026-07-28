@@ -26,11 +26,11 @@ import getpass
 from color_logger import logger
 
 # Docker image name template
-# suite_name: 'noble', 'resolute', 'trixie', 'sid'
+# suite_name: 'noble', 'resolute', 'trixie', 'forky', 'sid'
 # Example: ghcr.io/qualcomm-linux/pkg-builder:noble
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
 # Debian/Ubuntu suites currently supported by this wrapper for package builds.
-SUPPORTED_DEB_DISTROS = ("noble", "resolute", "trixie", "sid")
+SUPPORTED_DEB_DISTROS = ("noble", "resolute", "trixie", "forky", "sid")
 
 def _discover_available_distros() -> list:
     """
@@ -222,7 +222,7 @@ def build_docker_image(distro: str) -> bool:
     Build a Docker image from the local Dockerfile.
 
     Args:
-        distro (str): The distribution (e.g., 'noble', 'questing').
+        distro (str): The distribution (e.g., 'noble', 'forky').
 
     Returns:
         bool: True if the build succeeded, False otherwise.
