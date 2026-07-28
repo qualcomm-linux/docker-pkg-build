@@ -8,7 +8,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 COPY base-packages.txt /tmp/base-packages.txt
 
 RUN apt-get update && \
-    apt-get install -y $(cat /tmp/base-packages.txt | tr '\n' ' ') && \
+    BASE_PACKAGES=$(tr '\n' ' ' < /tmp/base-packages.txt) && \
+    if ! apt-cache show gh >/dev/null 2>&1; then \
+        echo "Package 'gh' is unavailable in forky; continuing without it."; \
+        BASE_PACKAGES=$(grep -vx 'gh' /tmp/base-packages.txt | tr '\n' ' '); \
+    fi && \
+    apt-get install -y ${BASE_PACKAGES} && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
