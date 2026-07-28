@@ -30,9 +30,6 @@ from color_logger import logger
 # Example: ghcr.io/qualcomm-linux/pkg-builder:noble
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
 
-# Distros excluded from automatic rebuild (e.g. temporarily broken upstream)
-SKIP_REBUILD_DISTROS = {"questing", "sid"}
-
 def _discover_available_distros() -> list:
     """
     Identify supported debian-based distros.
@@ -299,9 +296,6 @@ def rebuild_docker_images(distro: str = None) -> None:
         # Rebuild all available debian-based distros
         dockerfiles = []
         for distro in _discover_available_distros():
-            if distro in SKIP_REBUILD_DISTROS:
-                logger.warning(f"Skipping rebuild for '{distro}' (listed in SKIP_REBUILD_DISTROS)")
-                continue
             dockerfile_glob = os.path.join(docker_dir, f'Dockerfile.*.*{distro}')
             dockerfiles.extend(glob.glob(dockerfile_glob))
         dockerfiles = sorted(dockerfiles)
