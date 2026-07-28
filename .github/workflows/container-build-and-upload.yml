@@ -20,7 +20,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   QCOM_ORG_NAME: "qualcomm-linux"
@@ -33,6 +32,9 @@ jobs:
   # Cross compiling the image using buildx on an x86_64 host was tried but failed due to
   # issues with qemu and multiarch support in docker buildx.
   build-deb-arm64:
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
@@ -80,6 +82,9 @@ jobs:
           docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:trixie
 
   build-rpm-arm64:
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
