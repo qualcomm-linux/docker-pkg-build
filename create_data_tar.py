@@ -324,10 +324,12 @@ def fetch_artifactory_uris(query_name: str):
     return uris
 
 
-def fail_if_version_exists_in_artifactory(tar_name: str, args) -> None:
+def find_existing_version_in_artifactory(tar_name: str, args):
     """
-    Query Artifactory and fail when the same package version is already present
-    for the same architecture.
+    Query Artifactory for tarballs matching the same package/version/arch
+    (same distro folder layout, when --distro is given).
+    Returns the list of matching Artifactory URIs (empty if none found).
+    Raises RuntimeError if Artifactory itself could not be queried/parsed.
     """
     identity = parse_tar_identity(tar_name)
     if identity:
@@ -361,15 +363,7 @@ def fail_if_version_exists_in_artifactory(tar_name: str, args) -> None:
             if base == tar_name:
                 duplicates.append(uri)
 
-    if duplicates:
-        examples = "\n".join(f"  - {u}" for u in duplicates[:10])
-        extra = "" if len(duplicates) <= 10 else f"\n  ... and {len(duplicates) - 10} more"
-        raise RuntimeError(
-            "Version already exists in Artifactory; refusing to create tarball.\n"
-            f"  tar_name: {tar_name}\n"
-            f"  matches: {len(duplicates)}\n"
-            f"{examples}{extra}"
-        )
+    return duplicates
 
 
 def main():
@@ -395,12 +389,25 @@ def main():
     if tar_name == base:
         tar_name = base + '.tar.gz'
 
-    # Remote duplicate guard: fail early if this version already exists.
+    # Remote duplicate guard: warn and exit cleanly if this version already
+    # exists, so a caller batching multiple projects doesn't treat an
+    # already-published version as a fatal failure for the whole batch.
     try:
-        fail_if_version_exists_in_artifactory(tar_name, args)
+        duplicates = find_existing_version_in_artifactory(tar_name, args)
     except Exception as e:
         logger.critical(str(e))
         sys.exit(1)
+
+    if duplicates:
+        examples = "\n".join(f"  - {u}" for u in duplicates[:10])
+        extra = "" if len(duplicates) <= 10 else f"\n  ... and {len(duplicates) - 10} more"
+        logger.warning(
+            "Version already exists in Artifactory; skipping tarball creation.\n"
+            f"  tar_name: {tar_name}\n"
+            f"  matches: {len(duplicates)}\n"
+            f"{examples}{extra}"
+        )
+        sys.exit(0)
 
     # Remove stale metadata files from previous runs.
     try:
