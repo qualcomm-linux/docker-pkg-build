@@ -404,32 +404,15 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
     # Ensure git inside the container treats the mounted checkout as safe
     git_safe_cmd = "git config --global --add safe.directory /workspace/src"
 
-    # For packages with debian/watch (prebuilt binaries from Artifactory):
-    # mirror the action.yml / debusine-action two-step pattern:
-    #   1. uscan fetches the orig tarball into /workspace (parent of /workspace/src)
-    #   2. gbp buildpackage -S --git-no-create-orig produces the .dsc
-    #   3. sbuild builds binaries from the .dsc
-    # For packages without debian/watch, gbp creates the orig from git as usual.
+    # Packages with debian/watch: fetch the orig tarball via uscan, then let
+    # gbp pick it up with --git-tarball-dir instead of deriving it from git.
     watch_file = os.path.join(source_dir, "debian", "watch")
-    # Only use the uscan fetch path for prebuilt binary packages that pull
-    # their upstream tarball from Artifactory. Packages with a watch file
-    # pointing to a git forge (GitHub, etc.) have their orig tarball created
-    # by gbp from the upstream git tag — the normal gbp path handles those.
-    has_watch = False
-    if os.path.exists(watch_file):
-        try:
-            with open(watch_file, "r", errors="ignore") as wf:
-                watch_content = wf.read()
-            if "qartifactory" in watch_content:
-                has_watch = True
-                logger.info("debian/watch (Artifactory) found — will fetch orig tarball via uscan inside container")
-            else:
-                logger.debug("debian/watch found but not Artifactory — gbp will handle orig tarball from git")
-        except Exception:
-            pass
+    has_watch = os.path.exists(watch_file)
+    if has_watch:
+        logger.info("debian/watch found — will fetch orig tarball via uscan inside container")
 
     if has_watch:
-        gbp_orig_flag = "--git-no-create-orig"
+        gbp_orig_flag = "--git-tarball-dir=/workspace --git-compression=auto"
         uscan_step = (
             "cd /workspace/src && "
             "uscan --destdir /workspace --download-current-version && "
@@ -456,7 +439,8 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
             "VER=$(dpkg-parsechangelog -l /workspace/src/debian/changelog -S Version)"
         )
         dsc_check = (
-            "DSC=$(ls /workspace/${PKG}_${VER}.dsc 2>/dev/null | head -1) && "
+            # export-dir in debian/gbp.conf may place the .dsc outside /workspace
+            "DSC=$(find /workspace -maxdepth 3 -name \"${PKG}_${VER}.dsc\" 2>/dev/null | head -1) && "
             "[ -n \"$DSC\" ] || { echo \"ERROR: .dsc not found\"; exit 1; }"
         )
         steps = f"set -e; cd /workspace/src; {pkg_ver}; "
