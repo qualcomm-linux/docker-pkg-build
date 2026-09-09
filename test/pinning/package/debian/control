@@ -1,0 +1,16 @@
+Source: qcom-ci-pin-test
+Section: misc
+Priority: optional
+Maintainer: Qualcomm Linux CI <noreply@qualcomm.com>
+Build-Depends: debhelper-compat (= 13), libqcomdummy-dev
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: qcom-ci-pin-test
+Architecture: all
+Depends: ${misc:Depends}
+Description: CI regression test for docker-pkg-build --extra-repo-priority
+ Build-Depends on a synthetic libqcomdummy-dev published at conflicting
+ versions by two extra repos; debian/rules fails unless the pinned
+ version won dependency resolution. Reproduces and verifies the fix for
+ qualcomm-linux/docker-pkg-build#48.
