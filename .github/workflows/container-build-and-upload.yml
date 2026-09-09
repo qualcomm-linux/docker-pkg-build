@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          source_dir="${GITHUB_WORKSPACE}/.github/dummy-package"
+          source_dir="${GITHUB_WORKSPACE}/test/dummy-package"
           output_root="${GITHUB_WORKSPACE}/build/dummy-package"
 
           for distro in noble resolute trixie; do
