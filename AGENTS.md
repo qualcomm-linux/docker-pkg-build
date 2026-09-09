@@ -61,6 +61,12 @@ docker_deb_build.py -d <distro> --rebuild
 # Pass an additional APT repo at build time
 docker_deb_build.py -s <source-dir> -o <output-dir> -d <distro> \
   -e "deb [arch=arm64 signed-by=/etc/apt/keyrings/qsc-deb-releases.asc] https://... <suite> main"
+
+# Pin an --extra-repo's priority so its package wins even when its version
+# number is lower than another source's (positionally paired with -e, one
+# --extra-repo-priority per -e, in the same order)
+docker_deb_build.py -s <source-dir> -o <output-dir> -d <distro> \
+  -e "deb [trusted=yes] https://... <suite> main" --extra-repo-priority 1001
 ```
 
 ## When Editing Dockerfiles
