@@ -1,0 +1,5 @@
+qcom-ci-pin-test (0.1.0) unstable; urgency=medium
+
+  * Initial CI extra-repo pin-priority regression test package.
+
+ -- Qualcomm Linux CI <noreply@qualcomm.com>  Wed, 09 Sep 2026 12:00:00 -0700

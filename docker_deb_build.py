@@ -18,10 +18,14 @@ import traceback
 import platform
 import shutil
 import urllib.request
+import re
+import base64
 import glob
 import grp
 import pwd
 import getpass
+
+from urllib.parse import urlparse
 
 from color_logger import logger
 
@@ -109,7 +113,19 @@ def parse_arguments() -> argparse.Namespace:
                         action='append',
                         default=[],
                         help="Additional APT repository to include. Can be specified multiple times. Example: 'deb [arch=arm64 trusted=yes] http://pkg.qualcomm.com noble/stable main'")
-                        
+
+    parser.add_argument("--extra-repo-priority",
+                        type=int,
+                        action='append',
+                        default=[],
+                        help="APT pin priority (Pin-Priority) for the --extra-repo at the same position. "
+                             "Pairs positionally with --extra-repo: the Nth priority applies to the Nth --extra-repo, "
+                             "so if provided it must be specified once per --extra-repo, in the same order. "
+                             "A priority above 1000 will make APT prefer that repo's package even when its version "
+                             "number is lower than what's available elsewhere (e.g. to keep a downstream-patched "
+                             "package from being replaced by a newer upstream security release). Example: "
+                             "-e '...' --extra-repo-priority 1001")
+
     parser.add_argument("-p", "--extra-package",
                         type=str,
                         action='append',
@@ -138,6 +154,8 @@ def parse_arguments() -> argparse.Namespace:
             raise Exception("--run-lintian cannot be used with --rebuild mode")
         if args.extra_repo:
             raise Exception("--extra-repo cannot be used with --rebuild mode")
+        if args.extra_repo_priority:
+            raise Exception("--extra-repo-priority cannot be used with --rebuild mode")
         if args.extra_package:
             raise Exception("--extra-package cannot be used with --rebuild mode")
         if args.skip_gbp:
@@ -153,6 +171,11 @@ def parse_arguments() -> argparse.Namespace:
             args.output_dir = ".."
         if args.distro is None:
             raise Exception("--distro is required in build mode (when --rebuild is not used)")
+        if args.extra_repo_priority and len(args.extra_repo_priority) != len(args.extra_repo):
+            raise Exception(
+                "--extra-repo-priority must be specified once per --extra-repo, in the same order "
+                f"(got {len(args.extra_repo)} --extra-repo but {len(args.extra_repo_priority)} --extra-repo-priority)."
+            )
     return args
 
 def check_docker_dependencies(timeout: int = 20) -> bool:
@@ -372,7 +395,71 @@ def make_source_pkg_cmd(sbuild_cmd: str) -> str:
     )
 
 
-def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, distro: str, run_lintian: bool, extra_repo: str, extra_package: str, skip_gbp: bool, host_tmp_dir: str = None) -> bool:
+def _extra_repo_host(repo_line: str) -> str:
+    """
+    Extract the hostname from the first http(s) URL found in an --extra-repo
+    'deb ...' line. Used to generate an APT pin matching that repo by origin.
+    """
+    match = re.search(r'https?://[^\s\]]+', repo_line)
+    if not match:
+        raise Exception(f"Could not find an http(s) URL in --extra-repo value to pin: {repo_line!r}")
+    host = urlparse(match.group(0)).hostname
+    if not host:
+        raise Exception(f"Could not determine hostname from --extra-repo URL to pin: {match.group(0)!r}")
+    return host
+
+
+def build_apt_pin_commands(extra_repo: list[str], extra_repo_priority: list[int]) -> str:
+    """
+    Build --chroot-setup-commands options that pin each --extra-repo to its
+    paired --extra-repo-priority, by writing an APT preferences file into the
+    chroot before build-deps are resolved.
+
+    Pinning is done by origin (hostname): APT's 'Pin: origin' matches by
+    hostname only and ignores the port, so this is only distinct per-host,
+    not per-port.
+
+    Two --extra-repo entries on the same host can only be pinned to the same
+    priority: APT has no reliable way to tell them apart on hostname alone
+    (and neither suite nor the Release file's Origin/Label are guaranteed to
+    be distinctive - e.g. a repo built for the same suite as the base mirror
+    it's meant to override, or a generic Artifactory instance that doesn't
+    set a repo-specific Origin). Rather than silently picking one priority
+    over the other (APT itself resolves conflicting same-origin pins by
+    filename order, not by priority or recency - confirmed empirically), we
+    raise here so the conflict is visible instead of silently wrong.
+
+    Each preferences file is written via a base64-encoded payload instead of
+    an inline heredoc/echo with raw quotes: this string gets embedded once
+    directly in a 'bash -c' command, and a second time inside a
+    double-quoted --git-builder="..." string for quilt+gbp packages. Raw '"'
+    or newlines here would break that second, double-quoted nesting; base64's
+    alphabet has no shell metacharacters, so it survives both layers
+    unescaped.
+    """
+    host_priorities = {}
+    for repo, priority in zip(extra_repo, extra_repo_priority):
+        host = _extra_repo_host(repo)
+        if host in host_priorities and host_priorities[host] != priority:
+            raise Exception(
+                f"--extra-repo entries for host {host!r} request conflicting priorities "
+                f"({host_priorities[host]} and {priority}): APT pins by hostname only, so "
+                "these two repos can't be told apart and must share the same "
+                "--extra-repo-priority."
+            )
+        host_priorities[host] = priority
+
+    snippets = []
+    for idx, (repo, priority) in enumerate(zip(extra_repo, extra_repo_priority)):
+        host = _extra_repo_host(repo)
+        content = f'Package: *\nPin: origin "{host}"\nPin-Priority: {priority}\n'
+        encoded = base64.b64encode(content.encode()).decode()
+        pref_path = f"/etc/apt/preferences.d/90-extra-repo-{idx}.pref"
+        snippets.append(f"--chroot-setup-commands='echo {encoded} | base64 -d > {pref_path}'")
+    return " ".join(snippets)
+
+
+def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, distro: str, run_lintian: bool, extra_repo: list[str], extra_repo_priority: list[int], extra_package: list[str], skip_gbp: bool, host_tmp_dir: str = None) -> bool:
     """
     Build the debian package inside the given docker image.
     source_dir: path to the debian package source (mounted into the container)
@@ -380,6 +467,7 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
     distro: target distribution string (e.g. 'noble')
     run_lintian: whether to run lintian on the built package
     extra_repo: list of additional APT repositories to include
+    extra_repo_priority: list of APT pin priorities, paired positionally with extra_repo
     host_tmp_dir: host directory to bind-mount as container /tmp; if None, no host directory is mounted
     Returns True on success, False on failure.
     """
@@ -394,12 +482,13 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
     # Build the gbp command
     # The --git-builder value is a single string passed to gbp
     extra_repo_option = " ".join(f"--extra-repository='{repo}'" for repo in extra_repo) if extra_repo else ""
+    extra_repo_pin_option = build_apt_pin_commands(extra_repo, extra_repo_priority)
     extra_package_option = " ".join(f"--extra-package='{pkg}'" for pkg in extra_package) if extra_package else ""
     lintian_option = '--no-run-lintian' if not run_lintian else ""
     # --no-clean-source: skip dpkg-buildpackage --clean on host (avoids build-dep check outside chroot)
     # --chroot-mode=unshare: force using the mmdebstrap tarball chroot path for all supported suites.
     # --build-dep-resolver=aptitude: use non-default resolver that will accept alternate build-dependencies (Build-Depends: new-name | old-name)
-    sbuild_cmd = f"sbuild --chroot-mode=unshare --build-dep-resolver=aptitude --no-clean-source --build-dir=/workspace/output --host=arm64 --build=arm64 --dist={distro} {lintian_option} {extra_repo_option} {extra_package_option}"
+    sbuild_cmd = f"sbuild --chroot-mode=unshare --build-dep-resolver=aptitude --no-clean-source --build-dir=/workspace/output --host=arm64 --build=arm64 --dist={distro} {lintian_option} {extra_repo_option} {extra_repo_pin_option} {extra_package_option}"
 
     # Ensure git inside the container treats the mounted checkout as safe
     git_safe_cmd = "git config --global --add safe.directory /workspace/src"
@@ -600,6 +689,7 @@ def main() -> None:
             args.distro,
             args.run_lintian,
             args.extra_repo,
+            args.extra_repo_priority,
             args.extra_package,
             args.skip_gbp,
             args.host_tmp_dir,

@@ -135,6 +135,26 @@ docker_deb_build.py \
   --host-tmp-dir /var/tmp/sbuild
 ```
 
+### Pinning an extra APT repo
+
+If a package from `--extra-repo` needs to win dependency resolution even
+when a different source offers a numerically higher version (for example, a
+downstream-patched package losing to a newer upstream security release),
+pass `--extra-repo-priority` with an APT pin priority. It pairs positionally
+with `--extra-repo`: the Nth priority applies to the Nth `--extra-repo`, so
+if used it must be specified once per `--extra-repo`, in the same order. A
+priority above 1000 lets APT install a package even though it means picking
+a lower version number than what's otherwise available.
+
+```bash
+docker_deb_build.py \
+  --source-dir pkg-example \
+  --output-dir build \
+  --distro trixie \
+  --extra-repo "deb [trusted=yes] https://deb.example.com/qcom trixie main" \
+  --extra-repo-priority 1001
+```
+
 ### Docker Images
 
 To add a new suite, copy an existing suite Dockerfile in `Dockerfiles/` and adapt it for the new release.

@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          source_dir="${GITHUB_WORKSPACE}/.github/dummy-package"
+          source_dir="${GITHUB_WORKSPACE}/test/dummy-package"
           output_root="${GITHUB_WORKSPACE}/build/dummy-package"
 
           for distro in noble resolute trixie; do
@@ -80,6 +80,22 @@ jobs:
 
           # DEBIAN IMAGES
           docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:trixie
+
+  # Runs on its own runner (no state shared with build-deb-arm64), so it
+  # rebuilds the trixie image itself before exercising --extra-repo-priority.
+  test-extra-repo-pinning:
+    needs: build-deb-arm64
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run extra-repo pin-priority regression test
+        run: ./test/pinning/run-pinning-test.sh
 
   build-rpm-arm64:
     permissions:
