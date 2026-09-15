@@ -30,7 +30,7 @@ from urllib.parse import urlparse
 from color_logger import logger
 
 # Docker image name template
-# suite_name: 'noble', 'resolute', 'trixie', 'sid'
+# suite_name: 'noble', 'resolute', 'trixie', 'forky', 'sid'
 # Example: ghcr.io/qualcomm-linux/pkg-builder:noble
 DOCKER_IMAGE_NAME_FMT = "ghcr.io/qualcomm-linux/pkg-builder:{suite_name}"
 
@@ -100,7 +100,7 @@ def parse_arguments() -> argparse.Namespace:
 
     parser.add_argument("-d", "--distro",
                         type=str,
-                        choices=['noble', 'resolute', 'trixie', 'sid'],
+                        choices=['noble', 'resolute', 'trixie', 'forky', 'sid'],
                         default=None,
                         help="The target distribution for the package build (or rebuild if --rebuild is used). If not specified with --rebuild, all distros will be rebuilt.")
 

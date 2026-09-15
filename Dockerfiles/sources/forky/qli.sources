@@ -1,0 +1,7 @@
+# Qualcomm Linux repository
+Types: deb
+URIs: https://deb.debusine.qualcomm.com/qualcomm/qli
+Suites: forky
+Components: main contrib non-free-firmware non-free
+Signed-By: /etc/apt/keyrings/debusine.asc
+Enabled: yes
