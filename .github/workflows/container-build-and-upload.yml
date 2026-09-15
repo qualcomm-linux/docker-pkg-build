@@ -51,7 +51,7 @@ jobs:
           source_dir="${GITHUB_WORKSPACE}/test/dummy-package"
           output_root="${GITHUB_WORKSPACE}/build/dummy-package"
 
-          for distro in noble resolute trixie; do
+          for distro in noble resolute trixie forky; do
             output_dir="${output_root}/${distro}"
             mkdir -p "${output_dir}"
             echo "Testing image '${distro}' with docker_deb_build.py"
@@ -80,6 +80,7 @@ jobs:
 
           # DEBIAN IMAGES
           docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:trixie
+          docker push ghcr.io/${{env.QCOM_ORG_NAME}}/${{env.IMAGE_NAME}}:forky
 
   # Runs on its own runner (no state shared with build-deb-arm64), so it
   # rebuilds the trixie image itself before exercising --extra-repo-priority.
