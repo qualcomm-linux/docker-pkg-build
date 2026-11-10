@@ -389,6 +389,16 @@ def main():
     if tar_name == base:
         tar_name = base + '.tar.gz'
 
+    # Qualify the version with the target distro so the same upstream version
+    # built for different suites never collides in the tarball name/path.
+    # Idempotent: a no-op if the version already carries the +<distro> suffix
+    # (e.g. once debian/changelog itself adopts the convention upstream).
+    if args.distro:
+        identity = parse_tar_identity(tar_name)
+        if identity and not identity['version'].endswith(f"+{args.distro}"):
+            identity['version'] += f"+{args.distro}"
+            tar_name = "{pkg}_{version}_{arch}.tar.gz".format(**identity)
+
     # Remote duplicate guard: warn and exit cleanly if this version already
     # exists, so a caller batching multiple projects doesn't treat an
     # already-published version as a fatal failure for the whole batch.
