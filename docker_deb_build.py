@@ -353,7 +353,7 @@ def is_git_repo(source_dir: str) -> bool:
 
 def make_source_pkg_cmd(sbuild_cmd: str) -> str:
     """
-    Return a shell command (run inside the container, cwd=/workspace) that:
+    Return a shell command (run inside the container, cwd=/workspace/output) that:
 
       1. Reads the package name and version from debian/changelog.
       2. Creates an upstream orig tarball from the source tree, excluding the
@@ -362,15 +362,18 @@ def make_source_pkg_cmd(sbuild_cmd: str) -> str:
       4. Passes the resulting .dsc to sbuild for the actual binary build.
 
     All intermediate files (orig tarball, .dsc, debian.tar.*) are written to
-    /workspace (the parent of /workspace/src) so they don't pollute the source
-    tree and are accessible to sbuild.
+    /workspace/output (the bind-mounted output_dir) rather than /workspace,
+    so they survive after the container is removed and are accessible to sbuild.
+    dpkg-source reads/writes the orig tarball and build outputs relative to the
+    current working directory, independent of the source directory argument, so
+    this only requires running dpkg-source from /workspace/output.
 
     This path is taken for 3.0 (quilt) packages that are NOT managed by gbp
     (i.e. no debian/gbp.conf).  gbp is still used for proper gbp projects.
     """
     return (
         "set -e; "
-        "cd /workspace; "
+        "cd /workspace/output; "
         # Read package metadata from debian/changelog
         "PKG=$(dpkg-parsechangelog -l /workspace/src/debian/changelog -S Source); "
         "VER=$(dpkg-parsechangelog -l /workspace/src/debian/changelog -S Version); "
@@ -387,7 +390,7 @@ def make_source_pkg_cmd(sbuild_cmd: str) -> str:
         "echo \"[source-pkg] Running dpkg-source -b ...\"; "
         "dpkg-source -b /workspace/src; "
         # Locate the generated .dsc
-        "DSC_FILE=$(ls /workspace/${PKG}_${VER}.dsc 2>/dev/null | head -1); "
+        "DSC_FILE=$(ls /workspace/output/${PKG}_${VER}.dsc 2>/dev/null | head -1); "
         "[ -n \"$DSC_FILE\" ] || { echo \"ERROR: .dsc not found after dpkg-source -b\"; exit 1; }; "
         "echo \"[source-pkg] Source package ready: $DSC_FILE\"; "
         # Hand off to sbuild
@@ -492,7 +495,13 @@ def build_package_in_docker(image_name: str, source_dir: str, output_dir: str, d
 
     # Ensure git inside the container treats the mounted checkout as safe
     git_safe_cmd = "git config --global --add safe.directory /workspace/src"
-    gbp_cmd = f"{git_safe_cmd} && gbp buildpackage --git-no-pristine-tar --git-ignore-branch --git-builder=\"{sbuild_cmd}\""
+    # --git-export-dir: without it, gbp builds in place and writes the orig tarball,
+    # .dsc and debian.tar.* into the parent of /workspace/src (i.e. /workspace), which
+    # isn't bind-mounted and is lost when the container exits. Exporting to
+    # /workspace/output makes gbp land those files there instead, alongside the final
+    # sbuild output. The exported source copy itself is purged by gbp after a
+    # successful build (gbp's default), so only the build artifacts remain.
+    gbp_cmd = f"{git_safe_cmd} && gbp buildpackage --git-no-pristine-tar --git-ignore-branch --git-export-dir='/workspace/output' --git-builder=\"{sbuild_cmd}\""
 
     # Decide which build command to run based on debian/source/format in the source tree.
     # Prefer 'native' -> run sbuild directly. If the source format uses 'quilt', use gbp.
